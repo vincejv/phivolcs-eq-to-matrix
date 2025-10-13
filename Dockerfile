@@ -1,6 +1,5 @@
 FROM golang:1.25 AS build-env
 
-ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
@@ -16,7 +15,7 @@ ENV GOPATH=/go
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build -v -a -ldflags "-s -w" -o /go/bin/phivolcs-eq-to-matrix .
 
 # Build final image from alpine
-FROM --platform=${TARGETPLATFORM} alpine:latest
+FROM alpine:latest
 RUN apk --update --no-cache add curl && rm -rf /var/cache/apk/*
 COPY --from=build-env /go/bin/phivolcs-eq-to-matrix /usr/bin/phivolcs-eq-to-matrix
 
