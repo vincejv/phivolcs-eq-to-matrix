@@ -57,9 +57,6 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          tags: |
-            ghcr.io/${{ env.REGISTRY_IMAGE }}:latest
-            ghcr.io/${{ env.REGISTRY_IMAGE }}:${{ steps.commit.outputs.short }}
       - name: Export digest
         id: export
         run: |
