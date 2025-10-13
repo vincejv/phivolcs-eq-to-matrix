@@ -1,4 +1,4 @@
-FROM golang:1.25 AS build-env
+FROM golang:1.25.2 AS build-env
 
 ARG BUILDPLATFORM
 ARG TARGETOS
