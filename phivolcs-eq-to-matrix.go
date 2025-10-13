@@ -27,11 +27,27 @@ type Quake struct {
 
 // ---- Configuration (from environment variables) ----
 var (
-	matrixBaseURL = os.Getenv("MATRIX_BASE_URL") // e.g. https://matrix.example.org
-	matrixRoomID  = os.Getenv("MATRIX_ROOM_ID")  // e.g. !roomid:example.org
-	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN")
-	cacheFile     = "last_quakes.json"
+	matrixBaseURL  = os.Getenv("MATRIX_BASE_URL") // e.g. https://matrix.example.org
+	matrixRoomID   = os.Getenv("MATRIX_ROOM_ID")  // e.g. !roomid:example.org
+	accessToken    = os.Getenv("MATRIX_ACCESS_TOKEN")
+	cacheFile      = "last_quakes.json"
+	defaultMaxRows = 100
 )
+
+// getMaxRows reads an environment variable (PARSE_LIMIT)
+// and falls back to a default value if not set or invalid.
+func getMaxRows() int {
+	val := os.Getenv("PARSE_LIMIT")
+	if val == "" {
+		return defaultMaxRows
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		log.Printf("⚠️ Invalid PARSE_LIMIT value (%s), using default %d", val, defaultMaxRows)
+		return defaultMaxRows
+	}
+	return n
+}
 
 // Fetch and parse HTML
 func fetchDocument(url string) (*goquery.Document, error) {
@@ -202,7 +218,9 @@ func main() {
 			continue
 		}
 
-		quakes, err := parseFirstN(doc, 100)
+		maxRows := getMaxRows()
+		quakes, err := parseFirstN(doc, maxRows)
+		log.Printf("Parsing up to %d quake entries from PHIVOLCS", maxRows)
 		if err != nil {
 			log.Printf("Parse error: %v", err)
 			time.Sleep(150 * time.Second)

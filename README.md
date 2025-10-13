@@ -38,6 +38,7 @@ These control how the notifier connects to Matrix and manages data.
 | `MATRIX_BASE_URL` | ✅ | Matrix homeserver | `https://matrix.example.org` |
 | `MATRIX_ACCESS_TOKEN` | ✅ | Matrix access token (Bearer token) | `syt_abcdefgh123456789` |
 | `MATRIX_ROOM_ID` | ✅ | Matrix Room ID to which alerts are to be posted | `!roomid:example.org` |
+| `PARSE_LIMIT` | ⛔ | Number of quake data to fetch (defaults to `100`) | `50` |
 
 ---
 
