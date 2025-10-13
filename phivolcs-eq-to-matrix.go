@@ -93,18 +93,26 @@ func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 // ---- Cache handling ----
 func saveAllQuakes(quakes []Quake) {
 	data, _ := json.MarshalIndent(quakes, "", "  ")
-	_ = os.WriteFile(cacheFile, data, 0644)
+	err := os.WriteFile(cacheFile, data, 0644)
+	if err != nil {
+		log.Printf("❌ Failed to write cache file: %v", err)
+	} else {
+		log.Printf("💾 Cache updated successfully: %s (%d quakes)", cacheFile, len(quakes))
+	}
 }
 
 func readAllQuakes() map[string]Quake {
 	data, err := os.ReadFile(cacheFile)
 	if err != nil {
+		log.Printf("⚠️ Cache file not found, starting fresh: %s", cacheFile)
 		return map[string]Quake{}
 	}
 	var quakes []Quake
 	if err := json.Unmarshal(data, &quakes); err != nil {
+		log.Printf("⚠️ Failed to parse cache file, resetting: %v", err)
 		return map[string]Quake{}
 	}
+
 	m := make(map[string]Quake)
 	for _, q := range quakes {
 		key := q.DateTime + "|" + q.Location
