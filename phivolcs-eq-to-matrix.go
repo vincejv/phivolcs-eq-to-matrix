@@ -120,8 +120,6 @@ func saveAllQuakes(quakes []Quake) {
 	err := os.WriteFile(cacheFile, data, 0644)
 	if err != nil {
 		log.Printf("❌ Failed to write cache file: %v", err)
-	} else {
-		log.Printf("💾 Cache updated successfully: %s (%d quakes)", cacheFile, len(quakes))
 	}
 }
 
@@ -217,6 +215,9 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("🌋 PHIVOLCS-to-Matrix earthquake monitor started successfully ✅")
 
+	maxRows := getMaxRows()
+	log.Printf("Parsing up to %d quake entries from PHIVOLCS", maxRows)
+
 	for {
 		url := phivolcsURL
 		doc, err := fetchDocument(url)
@@ -226,9 +227,7 @@ func main() {
 			continue
 		}
 
-		maxRows := getMaxRows()
 		quakes, err := parseFirstN(doc, maxRows)
-		log.Printf("Parsing up to %d quake entries from PHIVOLCS", maxRows)
 		if err != nil {
 			log.Printf("Parse error: %v", err)
 			time.Sleep(150 * time.Second)
@@ -264,8 +263,6 @@ func main() {
 				log.Printf("🆕 New quake detected: %s | M%s | %s", q.DateTime, q.Magnitude, q.Location)
 				if err := postToMatrix(q, false, ""); err != nil {
 					log.Printf("Matrix post failed: %v", err)
-				} else {
-					log.Println("Posted new quake successfully ✅")
 				}
 			}
 
@@ -275,8 +272,6 @@ func main() {
 				log.Printf("🔁 Magnitude update: %s | %s → %s | %s", u.New.DateTime, u.Old, u.New.Magnitude, u.New.Location)
 				if err := postToMatrix(u.New, true, u.Old); err != nil {
 					log.Printf("Matrix post failed: %v", err)
-				} else {
-					log.Println("🔁 Posted updated quake successfully")
 				}
 			}
 		}
