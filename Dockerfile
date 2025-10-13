@@ -1,10 +1,10 @@
-FROM golang:1.25.2 AS build-env
+FROM golang:1.25-alpine AS build-env
 
 ARG BUILDPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
-RUN apt-get install -yq --no-install-recommends git
+RUN apk add --no-cache git
 
 # Copy source + vendor
 COPY . /go/src/github.com/vincejv/phivolcs-eq-to-matrix
