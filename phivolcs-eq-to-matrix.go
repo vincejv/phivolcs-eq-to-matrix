@@ -17,12 +17,12 @@ import (
 )
 
 type Quake struct {
-	DateTime  string
-	Latitude  string
-	Longitude string
-	Depth     string
-	Magnitude string
-	Location  string
+	DateTime  string `json:"datetime"`
+	Latitude  string `json:"latitude"`
+	Longitude string `json:"longitude"`
+	Depth     string `json:"depth"`
+	Magnitude string `json:"magnitude"`
+	Location  string `json:"location"`
 }
 
 // ---- Configuration (from environment variables) ----
@@ -30,9 +30,10 @@ var (
 	matrixBaseURL = os.Getenv("MATRIX_BASE_URL") // e.g. https://matrix.example.org
 	matrixRoomID  = os.Getenv("MATRIX_ROOM_ID")  // e.g. !roomid:example.org
 	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN")
-	cacheFile     = "last_quake.txt"
+	cacheFile     = "last_quakes.json"
 )
 
+// Fetch and parse HTML
 func fetchDocument(url string) (*goquery.Document, error) {
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	client := &http.Client{Transport: tr}
@@ -51,6 +52,7 @@ func fetchDocument(url string) (*goquery.Document, error) {
 	return doc, nil
 }
 
+// Parse quake table
 func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 	var results []Quake
 	selector := "body > div > table:nth-child(4) > tbody > tr"
@@ -85,23 +87,34 @@ func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 		}
 		return true
 	})
-
 	return results, nil
 }
 
-func readLastQuake() string {
+// ---- Cache handling ----
+func saveAllQuakes(quakes []Quake) {
+	data, _ := json.MarshalIndent(quakes, "", "  ")
+	_ = os.WriteFile(cacheFile, data, 0644)
+}
+
+func readAllQuakes() map[string]Quake {
 	data, err := os.ReadFile(cacheFile)
 	if err != nil {
-		return ""
+		return map[string]Quake{}
 	}
-	return strings.TrimSpace(string(data))
+	var quakes []Quake
+	if err := json.Unmarshal(data, &quakes); err != nil {
+		return map[string]Quake{}
+	}
+	m := make(map[string]Quake)
+	for _, q := range quakes {
+		key := q.DateTime + "|" + q.Location
+		m[key] = q
+	}
+	return m
 }
 
-func saveLastQuake(ts string) {
-	_ = os.WriteFile(cacheFile, []byte(ts), 0644)
-}
-
-func postToMatrix(q Quake) error {
+// ---- Matrix posting ----
+func postToMatrix(q Quake, updated bool, oldMag string) error {
 	if matrixBaseURL == "" || matrixRoomID == "" || accessToken == "" {
 		return fmt.Errorf("missing Matrix environment variables")
 	}
@@ -111,10 +124,18 @@ func postToMatrix(q Quake) error {
 		matrixRoomID,
 	)
 
-	msg := fmt.Sprintf(
-		"🌏 **Earthquake Alert!**\n\n📅 **Date & Time:** %s\n📍 **Location:** %s\n📈 **Magnitude:** %.1f\n📊 **Depth:** %skm\n🧭 **Coordinates:** %s°N, %s°E\n\nStay safe! ⚠️",
-		q.DateTime, q.Location, parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude,
-	)
+	var msg string
+	if updated {
+		msg = fmt.Sprintf(
+			"🔁 **Earthquake Update!**\n\n📅 **Date & Time:** %s\n📍 **Location:** %s\n📈 **Magnitude Updated:** %.1f → %.1f\n📊 **Depth:** %skm\n🧭 **Coordinates:** %s°N, %s°E\n\nRevised by PHIVOLCS ⚠️",
+			q.DateTime, q.Location, parseMag(oldMag), parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude,
+		)
+	} else {
+		msg = fmt.Sprintf(
+			"🌏 **New Earthquake Alert!**\n\n📅 **Date & Time:** %s\n📍 **Location:** %s\n📈 **Magnitude:** %.1f\n📊 **Depth:** %skm\n🧭 **Coordinates:** %s°N, %s°E\n\nStay safe! ⚠️",
+			q.DateTime, q.Location, parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude,
+		)
+	}
 
 	payload := map[string]string{
 		"msgtype":        "m.text",
@@ -137,7 +158,7 @@ func postToMatrix(q Quake) error {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("Matrix API error: %s", string(body))
 	}
@@ -149,46 +170,67 @@ func parseMag(m string) float64 {
 	return v
 }
 
+// ---- Main loop ----
 func main() {
 	for {
 		url := "https://earthquake.phivolcs.dost.gov.ph/"
 		doc, err := fetchDocument(url)
 		if err != nil {
-			log.Fatalf("Failed to fetch document: %v", err)
+			log.Printf("Fetch error: %v", err)
+			time.Sleep(150 * time.Second)
+			continue
 		}
 
 		quakes, err := parseFirstN(doc, 100)
 		if err != nil {
-			log.Fatalf("Parse error: %v", err)
+			log.Printf("Parse error: %v", err)
+			time.Sleep(150 * time.Second)
+			continue
 		}
 
-		lastStored := readLastQuake()
-		var newQuakes []Quake
+		oldQuakes := readAllQuakes()
+		var changed []Quake
+		var updated []struct {
+			New Quake
+			Old string
+		}
 
 		for _, q := range quakes {
-			if q.DateTime == lastStored {
-				break
+			key := q.DateTime + "|" + q.Location
+			old, exists := oldQuakes[key]
+			if !exists {
+				changed = append(changed, q)
+			} else if old.Magnitude != q.Magnitude {
+				updated = append(updated, struct {
+					New Quake
+					Old string
+				}{q, old.Magnitude})
 			}
-			newQuakes = append(newQuakes, q)
 		}
 
-		if len(newQuakes) == 0 {
-			log.Println("No new earthquake detected above magnitude 4.5.")
-			return
-		}
-
-		for i := len(newQuakes) - 1; i >= 0; i-- {
-			q := newQuakes[i]
-			fmt.Printf("Posting: %+v\n", q)
-			if err := postToMatrix(q); err != nil {
+		// Send new quakes
+		for i := len(changed) - 1; i >= 0; i-- {
+			q := changed[i]
+			log.Printf("Posting NEW quake: %+v\n", q)
+			if err := postToMatrix(q, false, ""); err != nil {
 				log.Printf("Matrix post failed: %v", err)
 			} else {
-				log.Println("Posted to Matrix successfully ✅")
+				log.Println("Posted new quake successfully ✅")
 			}
 		}
 
-		saveLastQuake(quakes[0].DateTime)
+		// Send updated quakes
+		for i := len(updated) - 1; i >= 0; i-- {
+			u := updated[i]
+			log.Printf("Posting UPDATED quake: %+v (old %s)\n", u.New, u.Old)
+			if err := postToMatrix(u.New, true, u.Old); err != nil {
+				log.Printf("Matrix post failed: %v", err)
+			} else {
+				log.Println("Posted updated quake successfully 🔁")
+			}
+		}
 
+		saveAllQuakes(quakes)
 		time.Sleep(150 * time.Second)
 	}
 }
