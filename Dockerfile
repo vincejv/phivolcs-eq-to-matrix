@@ -21,6 +21,7 @@ COPY --from=build-env /go/bin/phivolcs-eq-to-matrix /usr/bin/phivolcs-eq-to-matr
 
 # Create a group and user
 RUN addgroup -S phivolcs-eq-to-matrix && adduser -S phivolcs-eq-to-matrix -G phivolcs-eq-to-matrix
+WORKDIR /home/phivolcs-eq-to-matrix
 USER phivolcs-eq-to-matrix
 
 ENTRYPOINT ["phivolcs-eq-to-matrix"]
