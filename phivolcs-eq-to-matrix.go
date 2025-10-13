@@ -124,16 +124,26 @@ func postToMatrix(q Quake, updated bool, oldMag string) error {
 		matrixRoomID,
 	)
 
-	var msg string
+	var msg, formatted string
+	mapsLink := fmt.Sprintf("https://www.google.com/maps?q=%s,%s", q.Latitude, q.Longitude)
+
 	if updated {
 		msg = fmt.Sprintf(
-			"🔁 **Earthquake Update!**\n\n📅 **Date & Time:** %s\n📍 **Location:** %s\n📈 **Magnitude Updated:** %.1f → %.1f\n📊 **Depth:** %skm\n🧭 **Coordinates:** %s°N, %s°E\n\nRevised by PHIVOLCS ⚠️",
+			"🔁 Earthquake Update!\n\nDate & Time: %s\nLocation: %s\nMagnitude Updated: %.1f → %.1f\nDepth: %skm\nCoordinates: %s°N, %s°E\n\nRevised by PHIVOLCS ⚠️",
 			q.DateTime, q.Location, parseMag(oldMag), parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude,
+		)
+		formatted = fmt.Sprintf(
+			"🔁 <b>Earthquake Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude Updated:</b> %.1f → %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> <a href=\"%s\">%s°N, %s°E</a><br><br>Revised by PHIVOLCS ⚠️",
+			q.DateTime, q.Location, parseMag(oldMag), parseMag(q.Magnitude), q.Depth, mapsLink, q.Latitude, q.Longitude,
 		)
 	} else {
 		msg = fmt.Sprintf(
-			"🌏 **New Earthquake Alert!**\n\n📅 **Date & Time:** %s\n📍 **Location:** %s\n📈 **Magnitude:** %.1f\n📊 **Depth:** %skm\n🧭 **Coordinates:** %s°N, %s°E\n\nStay safe! ⚠️",
+			"🌏 New Earthquake Alert!\n\nDate & Time: %s\nLocation: %s\nMagnitude: %.1f\nDepth: %skm\nCoordinates: %s°N, %s°E\n\nStay safe! ⚠️",
 			q.DateTime, q.Location, parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude,
+		)
+		formatted = fmt.Sprintf(
+			"🌏 <b>New Earthquake Alert!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude:</b> %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> <a href=\"%s\">%s°N, %s°E</a><br><br>Stay safe! ⚠️",
+			q.DateTime, q.Location, parseMag(q.Magnitude), q.Depth, mapsLink, q.Latitude, q.Longitude,
 		)
 	}
 
@@ -141,7 +151,7 @@ func postToMatrix(q Quake, updated bool, oldMag string) error {
 		"msgtype":        "m.text",
 		"body":           msg,
 		"format":         "org.matrix.custom.html",
-		"formatted_body": strings.ReplaceAll(msg, "\n", "<br>"),
+		"formatted_body": formatted,
 	}
 
 	data, _ := json.Marshal(payload)
