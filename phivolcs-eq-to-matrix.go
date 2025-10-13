@@ -182,6 +182,9 @@ func parseMag(m string) float64 {
 
 // ---- Main loop ----
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Println("🌋 PHIVOLCS-to-Matrix earthquake monitor started successfully ✅")
+
 	for {
 		url := "https://earthquake.phivolcs.dost.gov.ph/"
 		doc, err := fetchDocument(url)
@@ -218,29 +221,34 @@ func main() {
 			}
 		}
 
-		// Send new quakes
-		for i := len(changed) - 1; i >= 0; i-- {
-			q := changed[i]
-			log.Printf("Posting NEW quake: %+v\n", q)
-			if err := postToMatrix(q, false, ""); err != nil {
-				log.Printf("Matrix post failed: %v", err)
-			} else {
-				log.Println("Posted new quake successfully ✅")
+		if len(changed) == 0 && len(updated) == 0 {
+			log.Println("No new or updated earthquakes detected.")
+		} else {
+			// Send new quakes
+			for i := len(changed) - 1; i >= 0; i-- {
+				q := changed[i]
+				log.Printf("🆕 New quake detected: %s | M%s | %s", q.DateTime, q.Magnitude, q.Location)
+				if err := postToMatrix(q, false, ""); err != nil {
+					log.Printf("Matrix post failed: %v", err)
+				} else {
+					log.Println("Posted new quake successfully ✅")
+				}
 			}
-		}
 
-		// Send updated quakes
-		for i := len(updated) - 1; i >= 0; i-- {
-			u := updated[i]
-			log.Printf("Posting UPDATED quake: %+v (old %s)\n", u.New, u.Old)
-			if err := postToMatrix(u.New, true, u.Old); err != nil {
-				log.Printf("Matrix post failed: %v", err)
-			} else {
-				log.Println("Posted updated quake successfully 🔁")
+			// Send updated quakes
+			for i := len(updated) - 1; i >= 0; i-- {
+				u := updated[i]
+				log.Printf("🔁 Magnitude update: %s | %s → %s | %s", u.New.DateTime, u.Old, u.New.Magnitude, u.New.Location)
+				if err := postToMatrix(u.New, true, u.Old); err != nil {
+					log.Printf("Matrix post failed: %v", err)
+				} else {
+					log.Println("🔁 Posted updated quake successfully")
+				}
 			}
 		}
 
 		saveAllQuakes(quakes)
+		log.Println("Sleeping for 150 seconds before next poll...")
 		time.Sleep(150 * time.Second)
 	}
 }
