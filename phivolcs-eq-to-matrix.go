@@ -23,6 +23,7 @@ type Quake struct {
 	Depth     string `json:"depth"`
 	Magnitude string `json:"magnitude"`
 	Location  string `json:"location"`
+	Bulletin  string `json:"bulletin"`
 }
 
 // ---- Configuration (from environment variables) ----
@@ -31,6 +32,7 @@ var (
 	matrixRoomID   = os.Getenv("MATRIX_ROOM_ID")  // e.g. !roomid:example.org
 	accessToken    = os.Getenv("MATRIX_ACCESS_TOKEN")
 	cacheFile      = "last_quakes.json"
+	phivolcsURL    = "https://earthquake.phivolcs.dost.gov.ph"
 	defaultMaxRows = 100
 )
 
@@ -83,12 +85,17 @@ func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 			return true
 		}
 
+		link, _ := tds.Eq(0).Find("a").Attr("href")
 		date := strings.TrimSpace(tds.Eq(0).Text())
 		lat := strings.TrimSpace(tds.Eq(1).Text())
 		lon := strings.TrimSpace(tds.Eq(2).Text())
 		depth := strings.TrimSpace(tds.Eq(3).Text())
 		mag := strings.TrimSpace(tds.Eq(4).Text())
 		loc := strings.TrimSpace(strings.Join(strings.Fields(tds.Eq(5).Text()), " "))
+		bulletinURL := ""
+		if link != "" {
+			bulletinURL = fmt.Sprintf("%s/%s", phivolcsURL, strings.ReplaceAll(link, "\\", "/"))
+		}
 
 		magVal, err := strconv.ParseFloat(mag, 64)
 		if err == nil && magVal >= 4.5 {
@@ -99,6 +106,7 @@ func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 				Depth:     depth,
 				Magnitude: mag,
 				Location:  loc,
+				Bulletin:  bulletinURL,
 			})
 		}
 		return true
@@ -153,21 +161,21 @@ func postToMatrix(q Quake, updated bool, oldMag string) error {
 
 	if updated {
 		msg = fmt.Sprintf(
-			"🔁 Earthquake Update!\n\nDate & Time: %s\nLocation: %s\nMagnitude Updated: %.1f → %.1f\nDepth: %skm\nCoordinates: %s°N, %s°E\n\nRevised by PHIVOLCS ⚠️",
-			q.DateTime, q.Location, parseMag(oldMag), parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude,
+			"🔁 Earthquake Update!\n\nDate & Time: %s\nLocation: %s\nMagnitude Updated: %.1f → %.1f\nDepth: %skm\nCoordinates: %s°N, %s°E\nBulletin: %s\n\nRevised by PHIVOLCS ⚠️",
+			q.DateTime, q.Location, parseMag(oldMag), parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude, q.Bulletin,
 		)
 		formatted = fmt.Sprintf(
-			"🔁 <b>Earthquake Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude Updated:</b> %.1f → %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> <a href=\"%s\">%s°N, %s°E</a><br><br>Revised by PHIVOLCS ⚠️",
-			q.DateTime, q.Location, parseMag(oldMag), parseMag(q.Magnitude), q.Depth, mapsLink, q.Latitude, q.Longitude,
+			"🔁 <b>Earthquake Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude Updated:</b> %.1f → %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> <a href=\"%s\">%s°N, %s°E</a><br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Revised by PHIVOLCS ⚠️",
+			q.DateTime, q.Location, parseMag(oldMag), parseMag(q.Magnitude), q.Depth, mapsLink, q.Latitude, q.Longitude, q.Bulletin,
 		)
 	} else {
 		msg = fmt.Sprintf(
-			"🌏 New Earthquake Alert!\n\nDate & Time: %s\nLocation: %s\nMagnitude: %.1f\nDepth: %skm\nCoordinates: %s°N, %s°E\n\nStay safe! ⚠️",
-			q.DateTime, q.Location, parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude,
+			"🌏 New Earthquake Alert!\n\nDate & Time: %s\nLocation: %s\nMagnitude: %.1f\nDepth: %skm\nCoordinates: %s°N, %s°E\nBulletin: %s\n\nStay safe! ⚠️",
+			q.DateTime, q.Location, parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude, q.Bulletin,
 		)
 		formatted = fmt.Sprintf(
-			"🌏 <b>New Earthquake Alert!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude:</b> %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> <a href=\"%s\">%s°N, %s°E</a><br><br>Stay safe! ⚠️",
-			q.DateTime, q.Location, parseMag(q.Magnitude), q.Depth, mapsLink, q.Latitude, q.Longitude,
+			"🌏 <b>New Earthquake Alert!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude:</b> %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> <a href=\"%s\">%s°N, %s°E</a><br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Stay safe! ⚠️",
+			q.DateTime, q.Location, parseMag(q.Magnitude), q.Depth, mapsLink, q.Latitude, q.Longitude, q.Bulletin,
 		)
 	}
 
@@ -210,7 +218,7 @@ func main() {
 	log.Println("🌋 PHIVOLCS-to-Matrix earthquake monitor started successfully ✅")
 
 	for {
-		url := "https://earthquake.phivolcs.dost.gov.ph/"
+		url := phivolcsURL
 		doc, err := fetchDocument(url)
 		if err != nil {
 			log.Printf("Fetch error: %v", err)
