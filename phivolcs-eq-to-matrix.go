@@ -38,6 +38,7 @@ var (
 	postQuakeFile  = "posted_quakes.json" // files to store posted matrix quakes
 	phivolcsURL    = "https://earthquake.phivolcs.dost.gov.ph"
 	defaultMaxRows = 100
+	dateTimeLayout = "02 January 2006 - 03:04 PM"
 )
 
 // getMaxRows reads an environment variable (PARSE_LIMIT)
@@ -89,12 +90,19 @@ func extractDateTimeFromURL(url string) (string, error) {
 	mm := match[4][2:4]
 	ss := match[4][4:6]
 
-	// Format like "15 October 2025 - 10:10:54 AM"
+	// Interim internal format: "2006-01-02 15:04:05"
+	// Target format: "02 January 2006 - 03:04 PM" as defined by `dateTimeLayout``
+	// Note: time.Parse uses reference time "Mon Jan 2 15:04:05 MST 2006"
+	// so we need to use that exact date/time for parsing
+	// then we can format it to our desired output
+	// Also note that the input time is in 24-hour format
+	// and we need to convert it to 12-hour format with AM/PM
+	// for the output format.
 	t, err := time.Parse("2006-01-02 15:04:05", fmt.Sprintf("%s-%s-%s %s:%s:%s", year, month, day, hh, mm, ss))
 	if err != nil {
 		return "", err
 	}
-	return t.Format("02 January 2006 - 03:04:05 PM"), nil
+	return t.Format(dateTimeLayout), nil
 }
 
 // Normalize date time string from PHIVOLCS raw table to ensure consistent format
@@ -290,11 +298,10 @@ func quakeOriginKey(q Quake) string {
 // Remove entries older than 2 months and convert map to slice
 func mapEqToSlice(m map[string]Quake) []Quake {
 	var s []Quake
-	layout := "02 January 2006 - 03:04 PM"
 	now := time.Now()
 
 	for k, v := range m {
-		t, err := time.Parse(layout, v.DateTime)
+		t, err := time.Parse(dateTimeLayout, v.DateTime)
 		if err != nil {
 			log.Printf("⚠️ Failed to parse datetime %q: %v", v.DateTime, err)
 			continue
@@ -309,8 +316,8 @@ func mapEqToSlice(m map[string]Quake) []Quake {
 
 	// Sort by datetime (newest first)
 	sort.Slice(s, func(i, j int) bool {
-		ti, _ := time.Parse(layout, s[i].DateTime)
-		tj, _ := time.Parse(layout, s[j].DateTime)
+		ti, _ := time.Parse(dateTimeLayout, s[i].DateTime)
+		tj, _ := time.Parse(dateTimeLayout, s[j].DateTime)
 		return ti.After(tj)
 	})
 
