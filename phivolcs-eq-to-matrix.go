@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -256,6 +257,14 @@ func mapEqToSlice(m map[string]Quake) []Quake {
 		}
 		s = append(s, v)
 	}
+
+	// Sort by datetime (newest first)
+	sort.Slice(s, func(i, j int) bool {
+		ti, _ := time.Parse(layout, s[i].DateTime)
+		tj, _ := time.Parse(layout, s[j].DateTime)
+		return ti.After(tj)
+	})
+
 	return s
 }
 
@@ -283,8 +292,8 @@ func main() {
 			continue
 		}
 
-		pastQuakes := readAllQuakesFromFile(cacheFile, quakeLocationKey)
-		postedQuakes := readAllQuakesFromFile(postQuakeFile, quakeOriginKey)
+		pastQuakes := readAllQuakesFromFile(cacheFile, quakeOriginKey)
+		postedQuakes := readAllQuakesFromFile(postQuakeFile, quakeLocationKey)
 
 		var changed []Quake
 		var postedQuakesToSave []Quake
