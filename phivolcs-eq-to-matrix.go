@@ -23,6 +23,7 @@ type Quake struct {
 	Depth     string `json:"depth"`
 	Magnitude string `json:"magnitude"`
 	Location  string `json:"location"`
+	Origin    string `json:"origin"`
 	Bulletin  string `json:"bulletin"`
 }
 
@@ -92,23 +93,22 @@ func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 		depth := strings.TrimSpace(tds.Eq(3).Text())
 		mag := strings.TrimSpace(tds.Eq(4).Text())
 		loc := strings.TrimSpace(strings.Join(strings.Fields(tds.Eq(5).Text()), " "))
+		origin := extractOrigin(loc)
 		bulletinURL := ""
 		if link != "" {
 			bulletinURL = fmt.Sprintf("%s/%s", phivolcsURL, strings.ReplaceAll(link, "\\", "/"))
 		}
 
-		magVal, err := strconv.ParseFloat(mag, 64)
-		if err == nil && magVal >= 4.5 {
-			results = append(results, Quake{
-				DateTime:  date,
-				Latitude:  lat,
-				Longitude: lon,
-				Depth:     depth,
-				Magnitude: mag,
-				Location:  loc,
-				Bulletin:  bulletinURL,
-			})
-		}
+		results = append(results, Quake{
+			DateTime:  date,
+			Latitude:  lat,
+			Longitude: lon,
+			Depth:     depth,
+			Magnitude: mag,
+			Location:  loc,
+			Origin:    origin,
+			Bulletin:  bulletinURL,
+		})
 		return true
 	})
 	return results, nil
@@ -210,6 +210,24 @@ func parseMag(m string) float64 {
 	return v
 }
 
+func extractOrigin(fullLoc string) string {
+	start := strings.Index(fullLoc, "of ")
+	if start != -1 {
+		// remove the "of " prefix
+		mainPart := strings.TrimSpace(fullLoc[start+3:])
+		return mainPart
+	}
+	return fullLoc
+}
+
+func quakeChanged(a, b Quake) bool {
+	return a.Magnitude != b.Magnitude ||
+		a.Depth != b.Depth ||
+		a.Location != b.Location ||
+		a.Latitude != b.Latitude ||
+		a.Longitude != b.Longitude
+}
+
 // ---- Main loop ----
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -242,11 +260,26 @@ func main() {
 		}
 
 		for _, q := range quakes {
-			key := q.DateTime + "|" + q.Location
+			// Use DateTime + Origin as unique key
+			// WIP: need to handle multiple quakes at the same minute
+			// e.g. "2024-06-01 12:34" + "100km NW of CityA"
+			// vs   "2024-06-01 12:34" + "150km SE of CityB"
+			// This is a temporary workaround until PHIVOLCS provides unique IDs
+			// for each earthquake event.
+			// For now, we assume no two quakes occur at the exact same minute
+			// and location description.
+			// Future improvement: parse the bulletin link for a unique ID if available.
+			key := q.DateTime + "|" + q.Origin
 			old, exists := oldQuakes[key]
 			if !exists {
-				changed = append(changed, q)
-			} else if old.Magnitude != q.Magnitude {
+				magVal, err := strconv.ParseFloat(q.Magnitude, 64)
+				if err == nil && magVal >= 4.5 {
+					// only report magnitudes greater than or equal to 4.5
+					// new earthquake recorded
+					changed = append(changed, q)
+				}
+			} else if quakeChanged(old, q) {
+				// delta for sending update
 				updated = append(updated, struct {
 					New Quake
 					Old string
