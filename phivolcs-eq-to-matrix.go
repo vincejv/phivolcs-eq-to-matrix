@@ -40,6 +40,8 @@ type Quake struct {
 }
 
 const (
+	// internal datetime format to store in cache files
+	dateTimeLayout     = "02 January 2006 - 03:04:05 PM"
 	defaultRefPointLat = 10.32
 	defaultRefPointLon = 123.90
 	defaultRefRadiusKm = 110.0
@@ -66,8 +68,6 @@ var (
 	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN") // e.g. syt_abcdefgh123456789
 	// maximum number of quake entries to parse
 	maxQuakeEntries = getEnvInt("PARSE_LIMIT", defaultMaxRows)
-	// internal datetime format to store in cache files
-	dateTimeLayout = "02 January 2006 - 03:04:05 PM"
 	// latitude, longitude and radius for filtering quakes when a bit below threshold
 	refPointLat = getEnvFloat("REF_POINT_LAT", defaultRefPointLat)
 	refPointLon = getEnvFloat("REF_POINT_LON", defaultRefPointLon)
