@@ -33,6 +33,7 @@ var (
 	matrixRoomID   = os.Getenv("MATRIX_ROOM_ID")  // e.g. !roomid:example.org
 	accessToken    = os.Getenv("MATRIX_ACCESS_TOKEN")
 	cacheFile      = "last_quakes.json"
+	postQuakeFile  = "posted_quakes.json" // files to store posted matrix quakes
 	phivolcsURL    = "https://earthquake.phivolcs.dost.gov.ph"
 	defaultMaxRows = 100
 )
@@ -115,29 +116,29 @@ func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 }
 
 // ---- Cache handling ----
-func saveAllQuakes(quakes []Quake) {
+func saveAllQuakesToFile(quakes []Quake, fileName string) {
 	data, _ := json.MarshalIndent(quakes, "", "  ")
-	err := os.WriteFile(cacheFile, data, 0644)
+	err := os.WriteFile(fileName, data, 0644)
 	if err != nil {
-		log.Printf("❌ Failed to write cache file: %v", err)
+		log.Printf("❌ Failed to write to file (%s): %v", fileName, err)
 	}
 }
-
-func readAllQuakes() map[string]Quake {
-	data, err := os.ReadFile(cacheFile)
+func readAllQuakesFromFile(fileName string, keyFunc func(Quake) string) map[string]Quake {
+	data, err := os.ReadFile(fileName)
 	if err != nil {
-		log.Printf("⚠️ Cache file not found, starting fresh: %s", cacheFile)
+		log.Printf("⚠️ File not found, starting fresh: %s", fileName)
 		return map[string]Quake{}
 	}
+
 	var quakes []Quake
 	if err := json.Unmarshal(data, &quakes); err != nil {
-		log.Printf("⚠️ Failed to parse cache file, resetting: %v", err)
+		log.Printf("⚠️ Failed to parse cache file (%s), resetting: %v", fileName, err)
 		return map[string]Quake{}
 	}
 
 	m := make(map[string]Quake)
 	for _, q := range quakes {
-		key := q.DateTime + "|" + q.Location
+		key := keyFunc(q)
 		m[key] = q
 	}
 	return m
@@ -228,6 +229,36 @@ func quakeChanged(a, b Quake) bool {
 		a.Longitude != b.Longitude
 }
 
+func quakeLocationKey(q Quake) string {
+	return q.DateTime + "|" + q.Location
+}
+
+func quakeOriginKey(q Quake) string {
+	return q.DateTime + "|" + q.Origin
+}
+
+// Remove entries older than 2 months and convert map to slice
+func mapEqToSlice(m map[string]Quake) []Quake {
+	var s []Quake
+	layout := "02 January 2006 - 03:04 PM"
+	now := time.Now()
+
+	for k, v := range m {
+		t, err := time.Parse(layout, v.DateTime)
+		if err != nil {
+			log.Printf("⚠️ Failed to parse datetime %q: %v", v.DateTime, err)
+			continue
+		}
+		// skip entries older than 2 months
+		if t.Before(now.AddDate(0, -2, 0)) {
+			delete(m, k)
+			continue
+		}
+		s = append(s, v)
+	}
+	return s
+}
+
 // ---- Main loop ----
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -252,14 +283,18 @@ func main() {
 			continue
 		}
 
-		oldQuakes := readAllQuakes()
+		pastQuakes := readAllQuakesFromFile(cacheFile, quakeLocationKey)
+		postedQuakes := readAllQuakesFromFile(postQuakeFile, quakeOriginKey)
+
 		var changed []Quake
+		var postedQuakesToSave []Quake
 		var updated []struct {
 			New Quake
 			Old string
 		}
 
-		for _, q := range quakes {
+		// parse each quake from latest fetch
+		for _, currentQuake := range quakes {
 			// Use DateTime + Origin as unique key
 			// WIP: need to handle multiple quakes at the same minute
 			// e.g. "2024-06-01 12:34" + "100km NW of CityA"
@@ -269,23 +304,35 @@ func main() {
 			// For now, we assume no two quakes occur at the exact same minute
 			// and location description.
 			// Future improvement: parse the bulletin link for a unique ID if available.
-			key := q.DateTime + "|" + q.Origin
-			old, exists := oldQuakes[key]
-			if !exists {
-				magVal, err := strconv.ParseFloat(q.Magnitude, 64)
-				if err == nil && magVal >= 4.5 {
-					// only report magnitudes greater than or equal to 4.5
-					// new earthquake recorded
-					changed = append(changed, q)
+
+			updatedQuakeKey := quakeOriginKey(currentQuake)
+			previousQuake, updateExists := pastQuakes[updatedQuakeKey]
+
+			if !updateExists {
+				// if not a delta update, check if already posted
+				postedQuakeKey := quakeLocationKey(currentQuake)
+				_, postedExists := postedQuakes[postedQuakeKey]
+				if !postedExists {
+					magVal, err := strconv.ParseFloat(currentQuake.Magnitude, 64)
+					if err == nil && magVal >= 4.5 {
+						// only report magnitudes greater than or equal to 4.5
+						// new earthquake recorded
+						changed = append(changed, currentQuake)
+						postedQuakesToSave = append(postedQuakesToSave, currentQuake)
+					}
 				}
-			} else if quakeChanged(old, q) {
+			} else if quakeChanged(previousQuake, currentQuake) {
 				// delta for sending update
 				updated = append(updated, struct {
 					New Quake
 					Old string
-				}{q, old.Magnitude})
+				}{currentQuake, previousQuake.Magnitude})
+				postedQuakesToSave = append(postedQuakesToSave, currentQuake)
 			}
 		}
+
+		// Append to existing slice
+		postedQuakesToSave = append(postedQuakesToSave, mapEqToSlice(postedQuakes)...)
 
 		if len(changed) == 0 && len(updated) == 0 {
 			log.Println("No new or updated earthquakes detected.")
@@ -309,7 +356,9 @@ func main() {
 			}
 		}
 
-		saveAllQuakes(quakes)
+		saveAllQuakesToFile(postedQuakesToSave, postQuakeFile)
+		saveAllQuakesToFile(quakes, cacheFile)
+
 		log.Println("Sleeping for 150 seconds before next poll...")
 		time.Sleep(150 * time.Second)
 	}
