@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -38,37 +39,68 @@ type Quake struct {
 	Bulletin string `json:"bulletin"`
 }
 
-// ---- Configuration (from environment variables) ----
-var (
-	// matrix configuration from environment variables
-	matrixBaseURL = os.Getenv("MATRIX_BASE_URL")     // e.g. https://matrix.example.org
-	matrixRoomID  = os.Getenv("MATRIX_ROOM_ID")      // e.g. !roomid:example.org
-	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN") // e.g. syt_abcdefgh123456789
+const (
+	defaultRefPointLat = 10.32
+	defaultRefPointLon = 123.90
+	defaultRefRadiusKm = 110.0
+	defaultMaxRows     = 500
 	// file to store last fetched quakes to check if a quake needs to be updated
 	cacheFile = "last_quakes.json"
 	// file to keep track of already posted quakes
 	postQuakeFile = "posted_quakes.json" // files to store posted matrix quakes
 	// PHIVOLCS URL and defaults
 	phivolcsURL = "https://earthquake.phivolcs.dost.gov.ph"
-	// maximum number of quake entries to parse
-	defaultMaxRows = 100
-	// internal datetime format to store in cache files
-	dateTimeLayout = "02 January 2006 - 03:04:05 PM"
+	// minimum magnitude to consider for posting even outside the refRadiusKm of refPoint
+	// e.g. a strong quake far away should still be reported
+	// while a weaker quake nearby should also be reported
+	globalMagThresh = 4.5
+	// minimum magnitude to consider when within refRadiusKm of refPoint (otherwise use globalMagThresh)
+	localMagThresh = 4.0
 )
 
-// getMaxRows reads an environment variable (PARSE_LIMIT)
-// and falls back to a default value if not set or invalid.
-func getMaxRows() int {
-	val := os.Getenv("PARSE_LIMIT")
+// ---- Configuration (from environment variables) ----
+var (
+	// matrix configuration from environment variables
+	matrixBaseURL = os.Getenv("MATRIX_BASE_URL")     // e.g. https://matrix.example.org
+	matrixRoomID  = os.Getenv("MATRIX_ROOM_ID")      // e.g. !roomid:example.org
+	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN") // e.g. syt_abcdefgh123456789
+	// maximum number of quake entries to parse
+	maxQuakeEntries = getEnvInt("PARSE_LIMIT", defaultMaxRows)
+	// internal datetime format to store in cache files
+	dateTimeLayout = "02 January 2006 - 03:04:05 PM"
+	// latitude, longitude and radius for filtering quakes when a bit below threshold
+	refPointLat = getEnvFloat("REF_POINT_LAT", defaultRefPointLat)
+	refPointLon = getEnvFloat("REF_POINT_LON", defaultRefPointLon)
+	refRadiusKm = getEnvFloat("REF_RADIUS_KM", defaultRefRadiusKm)
+)
+
+// --- helpers ---
+// getEnvInt reads an integer environment variable and falls back to a default if not set or invalid.
+func getEnvInt(envVar string, defaultVal int) int {
+	val := os.Getenv(envVar)
 	if val == "" {
-		return defaultMaxRows
+		return defaultVal
 	}
 	n, err := strconv.Atoi(val)
 	if err != nil || n <= 0 {
-		log.Printf("⚠️ Invalid PARSE_LIMIT value (%s), using default %d", val, defaultMaxRows)
-		return defaultMaxRows
+		log.Printf("⚠️ Invalid %s value (%s), using default %d", envVar, val, defaultVal)
+		return defaultVal
 	}
 	return n
+}
+
+// getEnvFloat reads a float environment variable and falls back to a default if not set or invalid.
+func getEnvFloat(envVar string, defaultVal float64) float64 {
+	val := os.Getenv(envVar)
+	if val == "" {
+		return defaultVal
+	}
+	f, err := strconv.ParseFloat(val, 64)
+	if err != nil || f <= 0 {
+		log.Printf("⚠️ Invalid %s value (%s), using default %.2f", envVar, val, defaultVal)
+		return defaultVal
+	}
+	return f
 }
 
 // Fetch and parse HTML
@@ -118,6 +150,31 @@ func extractDateTimeFromURL(url string) (string, error) {
 		return "", err
 	}
 	return t.Format(dateTimeLayout), nil
+}
+
+// Haversine formula to calculate distance between two lat/lon points in kilometers
+func distanceKm(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadiusKm = 6371.0
+	dLat := (lat2 - lat1) * math.Pi / 180.0
+	dLon := (lon2 - lon1) * math.Pi / 180.0
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*math.Pi/180.0)*math.Cos(lat2*math.Pi/180.0)*
+			math.Sin(dLon/2)*math.Sin(dLon/2)
+	return earthRadiusKm * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+}
+
+// Determine magnitude threshold based on distance from reference point
+func magnitudeThresholdFor(latStr, lonStr string) float64 {
+	lat, err1 := strconv.ParseFloat(latStr, 64)
+	lon, err2 := strconv.ParseFloat(lonStr, 64)
+	if err1 != nil || err2 != nil {
+		return globalMagThresh // fallback if coordinates invalid
+	}
+
+	if distanceKm(lat, lon, refPointLat, refPointLon) <= refRadiusKm {
+		return localMagThresh // local threshold
+	}
+	return globalMagThresh // outside area
 }
 
 // Normalize date time string from PHIVOLCS raw table to ensure consistent format
@@ -233,7 +290,7 @@ func postToMatrix(q Quake, updated bool, oldMag string) error {
 
 	if updated {
 		msg = fmt.Sprintf(
-			"🔁 Earthquake Update!\n\nDate & Time: %s\nLocation: %s\nMagnitude Updated: %.1f → %.1f\nDepth: %skm\nCoordinates: %s°N, %s°E\nBulletin: %s\n\nRevised by PHIVOLCS ⚠️",
+			"🔁 Earthquake Update!\n\nDate & Time: %s\nLocation: %s\nMagnitude Updated: %.1f → <b>%.1f</b>\nDepth: %skm\nCoordinates: %s°N, %s°E\nBulletin: %s\n\nRevised by PHIVOLCS ⚠️",
 			q.DateTime, q.Location, parseMag(oldMag), parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude, q.Bulletin,
 		)
 		formatted = fmt.Sprintf(
@@ -343,9 +400,7 @@ func mapEqToSlice(m map[string]Quake) []Quake {
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("🌋 PHIVOLCS-to-Matrix earthquake monitor started successfully ✅")
-
-	maxRows := getMaxRows()
-	log.Printf("Parsing up to %d quake entries from PHIVOLCS", maxRows)
+	log.Printf("Parsing up to %d quake entries from PHIVOLCS", maxQuakeEntries)
 
 	for {
 		url := phivolcsURL
@@ -356,7 +411,7 @@ func main() {
 			continue
 		}
 
-		latestQuakes, err := parseFirstN(doc, maxRows)
+		latestQuakes, err := parseFirstN(doc, maxQuakeEntries)
 		if err != nil {
 			log.Printf("Parse error: %v", err)
 			time.Sleep(30 * time.Second)
@@ -388,8 +443,12 @@ func main() {
 				_, postedExists := postedQuakes[postedQuakeKey]
 				if !postedExists {
 					magVal, err := strconv.ParseFloat(currentQuake.Magnitude, 64)
-					if err == nil && magVal >= 4.5 {
-						// only report magnitudes greater than or equal to 4.5
+
+					// determine threashold based on distance from reference point
+					threshold := magnitudeThresholdFor(currentQuake.Latitude, currentQuake.Longitude)
+
+					if err == nil && magVal >= threshold {
+						// only report magnitudes greater than or equal to determined threshold
 						// new earthquake recorded
 						changed = append(changed, currentQuake)
 						postedQuakesToSave = append(postedQuakesToSave, currentQuake)
