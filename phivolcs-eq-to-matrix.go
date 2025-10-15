@@ -329,11 +329,11 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 		}
 
 		msg = fmt.Sprintf(
-			"🔁 Earthquake Update!\n\nDate & Time: %s\nLocation: %s\nMagnitude Updated: %s\nDepth: %skm\nCoordinates: %s\nBulletin: %s\n\nRevised by PHIVOLCS ⚠️",
+			"🔁 Earthquake Bulletin Update!\n\nDate & Time: %s\nLocation: %s\nMagnitude: %s\nDepth: %skm\nCoordinates: %s\nBulletin: %s\n\nRevised by PHIVOLCS ⚠️",
 			updatedQuake.DateTime, locChangedPlain, magChangedPlain, depthChangedPlain, coordChangedPlain, updatedQuake.Bulletin,
 		)
 		formatted = fmt.Sprintf(
-			"🔁 <b>Earthquake Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude Updated:</b> %s<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> %s<br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Revised by PHIVOLCS ⚠️",
+			"🔁 <b>Earthquake Bulletin Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude:</b> %s<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> %s<br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Revised by PHIVOLCS ⚠️",
 			updatedQuake.DateTime, locChangedHTML, magChangedHTML, depthChangedHTML, coordChangedHTML, updatedQuake.Bulletin,
 		)
 	} else {
@@ -529,7 +529,7 @@ func main() {
 			// Send updated quakes
 			for i := len(updated) - 1; i >= 0; i-- {
 				u := updated[i]
-				log.Printf("🔁 Magnitude update: %s | %s → %s | %s", u.New.DateTime, u.Old, u.New.Magnitude, u.New.Location)
+				log.Printf("🔁 Earthquake bulletin update: %s | %s → %s | %s", u.New.DateTime, u.Old, u.New.Magnitude, u.New.Location)
 				if err := postToMatrix(u.New, true, u.Old); err != nil {
 					log.Printf("Matrix post failed: %v", err)
 				}
