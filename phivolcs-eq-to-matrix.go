@@ -280,7 +280,7 @@ func readAllQuakesFromFile(fileName string, keyFunc func(Quake) string) map[stri
 }
 
 // ---- Matrix posting ----
-func postToMatrix(q Quake, updated bool, oldMag string) error {
+func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 	if matrixBaseURL == "" || matrixRoomID == "" || accessToken == "" {
 		return fmt.Errorf("missing Matrix environment variables")
 	}
@@ -291,25 +291,57 @@ func postToMatrix(q Quake, updated bool, oldMag string) error {
 	)
 
 	var msg, formatted string
-	mapsLink := fmt.Sprintf("https://www.google.com/maps?q=%s,%s", q.Latitude, q.Longitude)
 
 	if updated {
+		locChangedPlain := oldQuake.Location
+		locChangedHTML := oldQuake.Location
+		if updatedQuake.Location != oldQuake.Location {
+			locChangedPlain = fmt.Sprintf("%s → %s", oldQuake.Location, updatedQuake.Location)
+			locChangedHTML = fmt.Sprintf("%s → <b>%s</b>", oldQuake.Location, updatedQuake.Location)
+		}
+
+		magChangedPlain := oldQuake.Magnitude
+		magChangedHTML := oldQuake.Magnitude
+		if updatedQuake.Magnitude != oldQuake.Magnitude {
+			magChangedPlain = fmt.Sprintf("%.1f → %.1f", parseMag(oldQuake.Magnitude), parseMag(updatedQuake.Magnitude))
+			magChangedHTML = fmt.Sprintf("%.1f → <b>%.1f</b>", parseMag(oldQuake.Magnitude), parseMag(updatedQuake.Magnitude))
+		}
+
+		depthChangedPlain := oldQuake.Depth
+		depthChangedHTML := oldQuake.Depth
+		if updatedQuake.Depth != oldQuake.Depth {
+			depthChangedPlain = fmt.Sprintf("%s → %s", oldQuake.Depth, updatedQuake.Depth)
+			depthChangedHTML = fmt.Sprintf("%s → <b>%s</b>", oldQuake.Depth, updatedQuake.Depth)
+		}
+
+		mapsLink := fmt.Sprintf("https://www.google.com/maps?q=%s,%s", oldQuake.Latitude, oldQuake.Longitude)
+		coordChangedPlain := fmt.Sprintf("%s°N, %s°E", oldQuake.Latitude, oldQuake.Longitude)
+		coordChangedHTML := fmt.Sprintf("<a href=\"%s\">%s°N, %s°E</a>", mapsLink, oldQuake.Latitude, oldQuake.Longitude)
+		if updatedQuake.Latitude != oldQuake.Latitude || updatedQuake.Longitude != oldQuake.Longitude {
+			updatedMapsLink := fmt.Sprintf("https://www.google.com/maps?q=%s,%s", updatedQuake.Latitude, updatedQuake.Longitude)
+			coordChangedPlain = fmt.Sprintf("%s°N, %s°E → %s°N, %s°E", oldQuake.Latitude, oldQuake.Longitude, updatedQuake.Latitude, updatedQuake.Longitude)
+			coordChangedHTML = fmt.Sprintf(
+				"<a href=\"%s\">%s°N, %s°E</a> → <b><a href=\"%s\">%s°N, %s°E</a></b>",
+				mapsLink, oldQuake.Latitude, oldQuake.Longitude,
+				updatedMapsLink, updatedQuake.Latitude, updatedQuake.Longitude)
+		}
+
 		msg = fmt.Sprintf(
-			"🔁 Earthquake Update!\n\nDate & Time: %s\nLocation: %s\nMagnitude Updated: %.1f → <b>%.1f</b>\nDepth: %skm\nCoordinates: %s°N, %s°E\nBulletin: %s\n\nRevised by PHIVOLCS ⚠️",
-			q.DateTime, q.Location, parseMag(oldMag), parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude, q.Bulletin,
+			"🔁 Earthquake Update!\n\nDate & Time: %s\nLocation: %s\nMagnitude Updated: %s\nDepth: %skm\nCoordinates: %s\nBulletin: %s\n\nRevised by PHIVOLCS ⚠️",
+			updatedQuake.DateTime, locChangedPlain, magChangedPlain, depthChangedPlain, coordChangedPlain, updatedQuake.Bulletin,
 		)
 		formatted = fmt.Sprintf(
-			"🔁 <b>Earthquake Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude Updated:</b> %.1f → %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> <a href=\"%s\">%s°N, %s°E</a><br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Revised by PHIVOLCS ⚠️",
-			q.DateTime, q.Location, parseMag(oldMag), parseMag(q.Magnitude), q.Depth, mapsLink, q.Latitude, q.Longitude, q.Bulletin,
+			"🔁 <b>Earthquake Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude Updated:</b> %s<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> %s<br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Revised by PHIVOLCS ⚠️",
+			updatedQuake.DateTime, locChangedHTML, magChangedHTML, depthChangedHTML, coordChangedHTML, updatedQuake.Bulletin,
 		)
 	} else {
 		msg = fmt.Sprintf(
 			"🌏 New Earthquake Alert!\n\nDate & Time: %s\nLocation: %s\nMagnitude: %.1f\nDepth: %skm\nCoordinates: %s°N, %s°E\nBulletin: %s\n\nStay safe! ⚠️",
-			q.DateTime, q.Location, parseMag(q.Magnitude), q.Depth, q.Latitude, q.Longitude, q.Bulletin,
+			updatedQuake.DateTime, updatedQuake.Location, parseMag(updatedQuake.Magnitude), updatedQuake.Depth, updatedQuake.Latitude, updatedQuake.Longitude, updatedQuake.Bulletin,
 		)
 		formatted = fmt.Sprintf(
 			"🌏 <b>New Earthquake Alert!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude:</b> %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> <a href=\"%s\">%s°N, %s°E</a><br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Stay safe! ⚠️",
-			q.DateTime, q.Location, parseMag(q.Magnitude), q.Depth, mapsLink, q.Latitude, q.Longitude, q.Bulletin,
+			updatedQuake.DateTime, updatedQuake.Location, parseMag(updatedQuake.Magnitude), updatedQuake.Depth, mapsLink, updatedQuake.Latitude, updatedQuake.Longitude, updatedQuake.Bulletin,
 		)
 	}
 
@@ -433,7 +465,7 @@ func main() {
 		var postedQuakesToSave []Quake
 		var updated []struct {
 			New Quake
-			Old string
+			Old Quake
 		}
 
 		// parse each quake from latest fetch
@@ -461,11 +493,19 @@ func main() {
 				}
 			} else if quakeChanged(previousQuake, currentQuake) {
 				// delta for sending update
-				updated = append(updated, struct {
-					New Quake
-					Old string
-				}{currentQuake, previousQuake.Magnitude})
-				postedQuakesToSave = append(postedQuakesToSave, currentQuake)
+				thresholdForUpdatedQ := magnitudeThresholdFor(currentQuake.Latitude, currentQuake.Longitude)
+				thresholdForOldQ := magnitudeThresholdFor(previousQuake.Latitude, previousQuake.Longitude)
+
+				if parseMag(currentQuake.Magnitude) >= thresholdForUpdatedQ ||
+					parseMag(previousQuake.Magnitude) >= thresholdForOldQ {
+					// only report updates if either the old or new magnitude is above the threshold
+					// earthquake updated
+					updated = append(updated, struct {
+						New Quake
+						Old Quake
+					}{currentQuake, previousQuake})
+					postedQuakesToSave = append(postedQuakesToSave, currentQuake)
+				}
 			}
 		}
 
@@ -479,7 +519,7 @@ func main() {
 			for i := len(changed) - 1; i >= 0; i-- {
 				q := changed[i]
 				log.Printf("🆕 New quake detected: %s | M%s | %s", q.DateTime, q.Magnitude, q.Location)
-				if err := postToMatrix(q, false, ""); err != nil {
+				if err := postToMatrix(q, false, q); err != nil { // optional: pass q as oldQuake to avoid zero-value
 					log.Printf("Matrix post failed: %v", err)
 				}
 			}
