@@ -53,7 +53,7 @@ var (
 	// maximum number of quake entries to parse
 	defaultMaxRows = 100
 	// internal datetime format to store in cache files
-	dateTimeLayout = "02 January 2006 - 03:04 PM"
+	dateTimeLayout = "02 January 2006 - 03:04:05 PM"
 )
 
 // getMaxRows reads an environment variable (PARSE_LIMIT)
