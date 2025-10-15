@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,6 +74,39 @@ func fetchDocument(url string) (*goquery.Document, error) {
 	return doc, nil
 }
 
+// Extract datetime from bulletin URL if possible
+func extractDateTimeFromURL(url string) (string, error) {
+	// Example: https://earthquake.phivolcs.dost.gov.ph/2025_Earthquake_Information/September/2025_0930_164854_B1.html
+	re := regexp.MustCompile(`(\d{4})_(\d{2})(\d{2})_(\d{6})`)
+	match := re.FindStringSubmatch(url)
+	if len(match) != 5 {
+		return "", fmt.Errorf("no datetime in URL")
+	}
+
+	// Parse values
+	year, month, day := match[1], match[2], match[3]
+	hh := match[4][0:2]
+	mm := match[4][2:4]
+	ss := match[4][4:6]
+
+	// Format like "15 October 2025 - 10:10:54 AM"
+	t, err := time.Parse("2006-01-02 15:04:05", fmt.Sprintf("%s-%s-%s %s:%s:%s", year, month, day, hh, mm, ss))
+	if err != nil {
+		return "", err
+	}
+	return t.Format("02 January 2006 - 03:04:05 PM"), nil
+}
+
+// Normalize date time string from PHIVOLCS raw table to ensure consistent format
+func normalizeDateTime(date string) string {
+	date = strings.TrimSpace(date)
+	if matched, _ := regexp.MatchString(` - \d{1,2}:\d{2} [AP]M$`, date); matched {
+		date = strings.Replace(date, " AM", ":00 AM", 1)
+		date = strings.Replace(date, " PM", ":00 PM", 1)
+	}
+	return date
+}
+
 // Parse quake table
 func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 	var results []Quake
@@ -89,20 +123,34 @@ func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 		}
 
 		link, _ := tds.Eq(0).Find("a").Attr("href")
-		date := strings.TrimSpace(tds.Eq(0).Text())
+		date := normalizeDateTime(strings.TrimSpace(tds.Eq(0).Text()))
 		lat := strings.TrimSpace(tds.Eq(1).Text())
 		lon := strings.TrimSpace(tds.Eq(2).Text())
 		depth := strings.TrimSpace(tds.Eq(3).Text())
 		mag := strings.TrimSpace(tds.Eq(4).Text())
 		loc := strings.TrimSpace(strings.Join(strings.Fields(tds.Eq(5).Text()), " "))
 		origin := extractOrigin(loc)
+
 		bulletinURL := ""
 		if link != "" {
 			bulletinURL = fmt.Sprintf("%s/%s", phivolcsURL, strings.ReplaceAll(link, "\\", "/"))
 		}
 
+		// Attempt to parse time from bulletin URL as it is more precise
+		// than the one in the table (which only has minute precision)
+		// If parsing fails, fallback to the date from the table and assume ":00" seconds
+		// which is still better than nothing.
+		// This is important for distinguishing multiple quakes
+		// that occur within the same minute.
+		dateTime := date
+		if bulletinURL != "" {
+			if parsed, err := extractDateTimeFromURL(bulletinURL); err == nil {
+				dateTime = parsed
+			}
+		}
+
 		results = append(results, Quake{
-			DateTime:  date,
+			DateTime:  dateTime,
 			Latitude:  lat,
 			Longitude: lon,
 			Depth:     depth,
@@ -113,6 +161,7 @@ func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 		})
 		return true
 	})
+
 	return results, nil
 }
 
@@ -281,18 +330,21 @@ func main() {
 		doc, err := fetchDocument(url)
 		if err != nil {
 			log.Printf("Fetch error: %v", err)
-			time.Sleep(150 * time.Second)
+			time.Sleep(30 * time.Second)
 			continue
 		}
 
-		quakes, err := parseFirstN(doc, maxRows)
+		latestQuakes, err := parseFirstN(doc, maxRows)
 		if err != nil {
 			log.Printf("Parse error: %v", err)
-			time.Sleep(150 * time.Second)
+			time.Sleep(30 * time.Second)
 			continue
 		}
 
-		pastQuakes := readAllQuakesFromFile(cacheFile, quakeOriginKey)
+		// this is used to determine if a quake is new or updated
+		lastFetchQuakes := readAllQuakesFromFile(cacheFile, quakeOriginKey)
+
+		// this is used to determine if a quake has already been posted to matrix
 		postedQuakes := readAllQuakesFromFile(postQuakeFile, quakeLocationKey)
 
 		var changed []Quake
@@ -303,22 +355,13 @@ func main() {
 		}
 
 		// parse each quake from latest fetch
-		for _, currentQuake := range quakes {
-			// Use DateTime + Origin as unique key
-			// WIP: need to handle multiple quakes at the same minute
-			// e.g. "2024-06-01 12:34" + "100km NW of CityA"
-			// vs   "2024-06-01 12:34" + "150km SE of CityB"
-			// This is a temporary workaround until PHIVOLCS provides unique IDs
-			// for each earthquake event.
-			// For now, we assume no two quakes occur at the exact same minute
-			// and location description.
-			// Future improvement: parse the bulletin link for a unique ID if available.
-
+		for _, currentQuake := range latestQuakes {
+			// check if quake exists in last fetch (by origin and datetime)
 			updatedQuakeKey := quakeOriginKey(currentQuake)
-			previousQuake, updateExists := pastQuakes[updatedQuakeKey]
+			previousQuake, updateExists := lastFetchQuakes[updatedQuakeKey]
 
 			if !updateExists {
-				// if not a delta update, check if already posted
+				// if not a delta update, check if already posted (by location and datetime)
 				postedQuakeKey := quakeLocationKey(currentQuake)
 				_, postedExists := postedQuakes[postedQuakeKey]
 				if !postedExists {
@@ -363,10 +406,12 @@ func main() {
 					log.Printf("Matrix post failed: %v", err)
 				}
 			}
+
+			// only save if there are new posts
+			saveAllQuakesToFile(postedQuakesToSave, postQuakeFile)
 		}
 
-		saveAllQuakesToFile(postedQuakesToSave, postQuakeFile)
-		saveAllQuakesToFile(quakes, cacheFile)
+		saveAllQuakesToFile(latestQuakes, cacheFile)
 
 		log.Println("Sleeping for 150 seconds before next poll...")
 		time.Sleep(150 * time.Second)
