@@ -58,6 +58,8 @@ const (
 	globalMagThresh = 4.5
 	// minimum magnitude to consider when within refRadiusKm of refPoint (otherwise use globalMagThresh)
 	localMagThresh = 4.0
+	// Google maps URL format
+	mapsBaseURL = "https://www.google.com/maps?q=%s,%s"
 )
 
 // ---- Configuration (from environment variables) ----
@@ -291,6 +293,7 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 	)
 
 	var msg, formatted string
+	mapsLink := fmt.Sprintf("%s%s,%s", mapsBaseURL, oldQuake.Latitude, oldQuake.Longitude)
 
 	if updated {
 		locChangedPlain := oldQuake.Location
@@ -314,11 +317,10 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 			depthChangedHTML = fmt.Sprintf("%s → <b>%s</b>", oldQuake.Depth, updatedQuake.Depth)
 		}
 
-		mapsLink := fmt.Sprintf("https://www.google.com/maps?q=%s,%s", oldQuake.Latitude, oldQuake.Longitude)
 		coordChangedPlain := fmt.Sprintf("%s°N, %s°E", oldQuake.Latitude, oldQuake.Longitude)
 		coordChangedHTML := fmt.Sprintf("<a href=\"%s\">%s°N, %s°E</a>", mapsLink, oldQuake.Latitude, oldQuake.Longitude)
 		if updatedQuake.Latitude != oldQuake.Latitude || updatedQuake.Longitude != oldQuake.Longitude {
-			updatedMapsLink := fmt.Sprintf("https://www.google.com/maps?q=%s,%s", updatedQuake.Latitude, updatedQuake.Longitude)
+			updatedMapsLink := fmt.Sprintf("%s%s,%s", mapsBaseURL, updatedQuake.Latitude, updatedQuake.Longitude)
 			coordChangedPlain = fmt.Sprintf("%s°N, %s°E → %s°N, %s°E", oldQuake.Latitude, oldQuake.Longitude, updatedQuake.Latitude, updatedQuake.Longitude)
 			coordChangedHTML = fmt.Sprintf(
 				"<a href=\"%s\">%s°N, %s°E</a> → <b><a href=\"%s\">%s°N, %s°E</a></b>",
