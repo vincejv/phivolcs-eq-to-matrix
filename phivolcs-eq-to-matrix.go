@@ -122,7 +122,7 @@ func fetchDocument(url string) (*goquery.Document, error) {
 	return doc, nil
 }
 
-// Extract datetime from bulletin URL if possible
+// Extract datetime (in UTC) from bulletin URL if possible
 func extractDateTimeFromURL(url string) (string, error) {
 	// Example: https://earthquake.phivolcs.dost.gov.ph/2025_Earthquake_Information/September/2025_0930_164854_B1.html
 	re := regexp.MustCompile(`(\d{4})_(\d{2})(\d{2})_(\d{6})`)
@@ -137,18 +137,23 @@ func extractDateTimeFromURL(url string) (string, error) {
 	mm := match[4][2:4]
 	ss := match[4][4:6]
 
-	// Interim internal format: "2006-01-02 15:04:05"
-	// Target format: "02 January 2006 - 03:04 PM" as defined by `dateTimeLayout``
+	// Interim internal format: "2006-01-02 15:04:05" in UTC (time in URL is in UTC)
 	// Note: time.Parse uses reference time "Mon Jan 2 15:04:05 MST 2006"
-	// so we need to use that exact date/time for parsing
-	// then we can format it to our desired output
-	// Also note that the input time is in 24-hour format
-	// and we need to convert it to 12-hour format with AM/PM
-	// for the output format.
+	// to determine the format, so we use that exact date/time in the layout.
+	// We then convert to local time (Philippine time, UTC+8)
+	// when formatting the final output and storing interally.
+	// This is important for correct sorting and comparison of quake times.
+	// PHIVOLCS Bulletin URL reports times in UTC, but we want to store in local time.
+	// We assume the time in the URL is always in UTC.
 	t, err := time.Parse("2006-01-02 15:04:05", fmt.Sprintf("%s-%s-%s %s:%s:%s", year, month, day, hh, mm, ss))
 	if err != nil {
 		return "", err
 	}
+
+	// Convert from UTC to Philippine time (+8)
+	t = t.Add(8 * time.Hour)
+
+	// Format in the desired local format
 	return t.Format(dateTimeLayout), nil
 }
 
