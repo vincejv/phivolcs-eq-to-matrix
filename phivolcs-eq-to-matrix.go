@@ -19,25 +19,40 @@ import (
 )
 
 type Quake struct {
-	DateTime  string `json:"datetime"`
-	Latitude  string `json:"latitude"`
+	// Date and Time when the seismic event occurred
+	// Format: "02 January 2006 - 03:04 PM"
+	DateTime string `json:"datetime"`
+	// Approximate Latitude in decimal degrees
+	Latitude string `json:"latitude"`
+	// Approximate Longitude in decimal degrees
 	Longitude string `json:"longitude"`
-	Depth     string `json:"depth"`
+	// Depth in kilometers
+	Depth string `json:"depth"`
+	// Magnitude as string (e.g. "5.2")
 	Magnitude string `json:"magnitude"`
-	Location  string `json:"location"`
-	Origin    string `json:"origin"`
-	Bulletin  string `json:"bulletin"`
+	// Location description including the relative position
+	Location string `json:"location"`
+	// Origin location without the relative position
+	Origin string `json:"origin"`
+	// PHIVOLCS bulletin URL
+	Bulletin string `json:"bulletin"`
 }
 
 // ---- Configuration (from environment variables) ----
 var (
-	matrixBaseURL  = os.Getenv("MATRIX_BASE_URL") // e.g. https://matrix.example.org
-	matrixRoomID   = os.Getenv("MATRIX_ROOM_ID")  // e.g. !roomid:example.org
-	accessToken    = os.Getenv("MATRIX_ACCESS_TOKEN")
-	cacheFile      = "last_quakes.json"
-	postQuakeFile  = "posted_quakes.json" // files to store posted matrix quakes
-	phivolcsURL    = "https://earthquake.phivolcs.dost.gov.ph"
+	// matrix configuration from environment variables
+	matrixBaseURL = os.Getenv("MATRIX_BASE_URL")     // e.g. https://matrix.example.org
+	matrixRoomID  = os.Getenv("MATRIX_ROOM_ID")      // e.g. !roomid:example.org
+	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN") // e.g. syt_abcdefgh123456789
+	// file to store last fetched quakes to check if a quake needs to be updated
+	cacheFile = "last_quakes.json"
+	// file to keep track of already posted quakes
+	postQuakeFile = "posted_quakes.json" // files to store posted matrix quakes
+	// PHIVOLCS URL and defaults
+	phivolcsURL = "https://earthquake.phivolcs.dost.gov.ph"
+	// maximum number of quake entries to parse
 	defaultMaxRows = 100
+	// internal datetime format to store in cache files
 	dateTimeLayout = "02 January 2006 - 03:04 PM"
 )
 
