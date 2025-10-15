@@ -296,11 +296,11 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 	mapsLink := fmt.Sprintf("%s%s,%s", mapsBaseURL, oldQuake.Latitude, oldQuake.Longitude)
 
 	if updated {
-		locChangedPlain := oldQuake.Location
-		locChangedHTML := oldQuake.Location
+		locChangedPlain := fmt.Sprintf("Location: %s", oldQuake.Location)
+		locChangedHTML := fmt.Sprintf("📍 Location: %s", oldQuake.Location)
 		if updatedQuake.Location != oldQuake.Location {
-			locChangedPlain = fmt.Sprintf("%s → %s", oldQuake.Location, updatedQuake.Location)
-			locChangedHTML = fmt.Sprintf("%s → <b>%s</b>", oldQuake.Location, updatedQuake.Location)
+			locChangedPlain = fmt.Sprintf("New Location: %s\nOld: %s", updatedQuake.Location, oldQuake.Location)
+			locChangedHTML = fmt.Sprintf("📍 New Location: <b>%s</b><br>Old: %s", updatedQuake.Location, oldQuake.Location)
 		}
 
 		magChangedPlain := oldQuake.Magnitude
@@ -329,11 +329,11 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 		}
 
 		msg = fmt.Sprintf(
-			"🔁 Earthquake Bulletin Update!\n\nDate & Time: %s\nLocation: %s\nMagnitude: %s\nDepth: %skm\nCoordinates: %s\nBulletin: %s\n\nRevised by PHIVOLCS ⚠️",
+			"🔁 Earthquake Bulletin Update!\n\nDate & Time: %s\n%s\nMagnitude: %s\nDepth: %skm\nCoordinates: %s\nBulletin: %s\n\nRevised by PHIVOLCS ⚠️",
 			updatedQuake.DateTime, locChangedPlain, magChangedPlain, depthChangedPlain, coordChangedPlain, updatedQuake.Bulletin,
 		)
 		formatted = fmt.Sprintf(
-			"🔁 <b>Earthquake Bulletin Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude:</b> %s<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> %s<br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Revised by PHIVOLCS ⚠️",
+			"🔁 <b>Earthquake Bulletin Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>%s<br>📈 <b>Magnitude:</b> %s<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> %s<br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Revised by PHIVOLCS ⚠️",
 			updatedQuake.DateTime, locChangedHTML, magChangedHTML, depthChangedHTML, coordChangedHTML, updatedQuake.Bulletin,
 		)
 	} else {
