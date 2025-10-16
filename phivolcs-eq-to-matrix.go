@@ -567,8 +567,10 @@ func main() {
 				// check if this updated bulletin has already been posted
 				skipPostingUpdate := false
 				for _, postQ := range postedQuakes {
-					skipPostingUpdate = isKnownBulletin(currentQuake, postQ)
-					break
+					if isKnownBulletin(currentQuake, postQ) {
+						skipPostingUpdate = true
+						break
+					}
 				}
 				if !skipPostingUpdate {
 					// delta for sending update
