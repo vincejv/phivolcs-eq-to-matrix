@@ -281,6 +281,47 @@ func readAllQuakesFromFile(fileName string, keyFunc func(Quake) string) map[stri
 	return m
 }
 
+// Determine if two quakes have the same date and time up to minute precision
+// (ignoring seconds) as PHIVOLCS sometimes rounds seconds inconsistently.
+func sameDateAndTimeHM(t1, t2 string) bool {
+	layout := dateTimeLayout
+	// Parse both date-times
+	d1, err1 := time.Parse(layout, t1)
+	d2, err2 := time.Parse(layout, t2)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+
+	// Compare only date, hour, and minute
+	return d1.Year() == d2.Year() &&
+		d1.Month() == d2.Month() &&
+		d1.Day() == d2.Day() &&
+		d1.Hour() == d2.Hour() &&
+		d1.Minute() == d2.Minute()
+}
+
+// Determine if currentQuake is a revised bulletin of pastQuake
+// (same date/time up to minute precision and same origin, but higher bulletin number)
+func isRevisedQuake(currentQuake, pastQ Quake) bool {
+	currNum, ok1 := getBulletinNumber(currentQuake.Bulletin)
+	pastNum, ok2 := getBulletinNumber(pastQ.Bulletin)
+
+	if !ok1 || !ok2 {
+		return false
+	}
+
+	return sameDateAndTimeHM(currentQuake.DateTime, pastQ.DateTime) &&
+		pastQ.Origin == currentQuake.Origin &&
+		currNum > pastNum
+}
+
+// Determine if currentQuake bulletin has already been posted/known
+// (same date/time up to minute precision and same bulletin URL)
+func isKnownBulletin(currentQuake, pastQ Quake) bool {
+	return sameDateAndTimeHM(currentQuake.DateTime, pastQ.DateTime) &&
+		currentQuake.Bulletin == pastQ.Bulletin
+}
+
 // ---- Matrix posting ----
 func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 	if matrixBaseURL == "" || matrixRoomID == "" || accessToken == "" {
@@ -395,7 +436,8 @@ func quakeChanged(a, b Quake) bool {
 		a.Depth != b.Depth ||
 		a.Location != b.Location ||
 		a.Latitude != b.Latitude ||
-		a.Longitude != b.Longitude
+		a.Longitude != b.Longitude ||
+		a.Bulletin != b.Bulletin
 }
 
 func quakeLocationKey(q Quake) string {
@@ -404,6 +446,19 @@ func quakeLocationKey(q Quake) string {
 
 func quakeOriginKey(q Quake) string {
 	return q.DateTime + "|" + q.Origin
+}
+
+func getBulletinNumber(url string) (int, bool) {
+	// Regex to capture the digit after B (ignore optional F)
+	re := regexp.MustCompile(`_B(\d)F?\.html$`)
+	match := re.FindStringSubmatch(url)
+	if len(match) > 1 {
+		num, err := strconv.Atoi(match[1])
+		if err == nil {
+			return num, true
+		}
+	}
+	return 0, false
 }
 
 // Remove entries older than 2 months and convert map to slice
@@ -476,6 +531,21 @@ func main() {
 			updatedQuakeKey := quakeOriginKey(currentQuake)
 			previousQuake, updateExists := lastFetchQuakes[updatedQuakeKey]
 
+			// even if not found by origin, check if it is a revised bulletin of a past quake
+			// (same date/time up to minute precision and same origin, but higher bulletin number)
+			// this is to handle cases where the origin text changes slightly between bulletins
+			if !updateExists {
+				if bulletinNo, _ := getBulletinNumber(currentQuake.Bulletin); bulletinNo != 1 {
+					for _, pastQ := range lastFetchQuakes {
+						if isRevisedQuake(currentQuake, pastQ) {
+							previousQuake = pastQ
+							updateExists = true
+							break
+						}
+					}
+				}
+			}
+
 			if !updateExists {
 				// if not a delta update, check if already posted (by location and datetime)
 				postedQuakeKey := quakeLocationKey(currentQuake)
@@ -494,19 +564,27 @@ func main() {
 					}
 				}
 			} else if quakeChanged(previousQuake, currentQuake) {
-				// delta for sending update
-				thresholdForUpdatedQ := magnitudeThresholdFor(currentQuake.Latitude, currentQuake.Longitude)
-				thresholdForOldQ := magnitudeThresholdFor(previousQuake.Latitude, previousQuake.Longitude)
+				// check if this updated bulletin has already been posted
+				skipPostingUpdate := false
+				for _, postQ := range postedQuakes {
+					skipPostingUpdate = isKnownBulletin(currentQuake, postQ)
+					break
+				}
+				if !skipPostingUpdate {
+					// delta for sending update
+					thresholdForUpdatedQ := magnitudeThresholdFor(currentQuake.Latitude, currentQuake.Longitude)
+					thresholdForOldQ := magnitudeThresholdFor(previousQuake.Latitude, previousQuake.Longitude)
 
-				if parseMag(currentQuake.Magnitude) >= thresholdForUpdatedQ ||
-					parseMag(previousQuake.Magnitude) >= thresholdForOldQ {
-					// only report updates if either the old or new magnitude is above the threshold
-					// earthquake updated
-					updated = append(updated, struct {
-						New Quake
-						Old Quake
-					}{currentQuake, previousQuake})
-					postedQuakesToSave = append(postedQuakesToSave, currentQuake)
+					if parseMag(currentQuake.Magnitude) >= thresholdForUpdatedQ ||
+						parseMag(previousQuake.Magnitude) >= thresholdForOldQ {
+						// only report updates if either the old or new magnitude is above the threshold
+						// earthquake updated
+						updated = append(updated, struct {
+							New Quake
+							Old Quake
+						}{currentQuake, previousQuake})
+						postedQuakesToSave = append(postedQuakesToSave, currentQuake)
+					}
 				}
 			}
 		}
