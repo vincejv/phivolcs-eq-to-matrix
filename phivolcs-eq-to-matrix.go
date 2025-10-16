@@ -59,7 +59,7 @@ const (
 	// minimum magnitude to consider when within refRadiusKm of refPoint (otherwise use globalMagThresh)
 	localMagThresh = 4.0
 	// Google maps URL format
-	mapsBaseURL = "https://www.google.com/maps?q=%s,%s"
+	mapsBaseURL = "https://www.google.com/maps?q="
 )
 
 // ---- Configuration (from environment variables) ----
@@ -322,6 +322,16 @@ func isKnownBulletin(currentQuake, pastQ Quake) bool {
 		currentQuake.Bulletin == pastQ.Bulletin
 }
 
+// Build Google Maps HTML link given latitude and longitude
+func buildMapsHtmlLink(lat, lon string) string {
+	return fmt.Sprintf("<a href=\"%s%s,%s\">%s°N, %s°E</a>", mapsBaseURL, lat, lon, lat, lon)
+}
+
+// Build plain text coordinates string
+func buildCoordinates(lat, lon string) string {
+	return fmt.Sprintf("%s°N, %s°E", lat, lon)
+}
+
 // ---- Matrix posting ----
 func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 	if matrixBaseURL == "" || matrixRoomID == "" || accessToken == "" {
@@ -334,14 +344,14 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 	)
 
 	var msg, formatted string
-	mapsLink := fmt.Sprintf("%s%s,%s", mapsBaseURL, oldQuake.Latitude, oldQuake.Longitude)
+	mapsLink := buildMapsHtmlLink(oldQuake.Latitude, oldQuake.Longitude)
 
 	if updated {
 		locChangedPlain := fmt.Sprintf("Location: %s", oldQuake.Location)
 		locChangedHTML := fmt.Sprintf("📍 Location: %s", oldQuake.Location)
 		if updatedQuake.Location != oldQuake.Location {
-			locChangedPlain = fmt.Sprintf("New Location: %s\nOld: %s", updatedQuake.Location, oldQuake.Location)
-			locChangedHTML = fmt.Sprintf("📍 New Location: <b>%s</b><br>Old: %s", updatedQuake.Location, oldQuake.Location)
+			locChangedPlain = fmt.Sprintf("New Location: %s\nPrevious: %s", updatedQuake.Location, oldQuake.Location)
+			locChangedHTML = fmt.Sprintf("📍 New Location: <b>%s</b><br>Previous: %s", updatedQuake.Location, oldQuake.Location)
 		}
 
 		magChangedPlain := oldQuake.Magnitude
@@ -358,32 +368,32 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 			depthChangedHTML = fmt.Sprintf("%s → <b>%s</b>", oldQuake.Depth, updatedQuake.Depth)
 		}
 
-		coordChangedPlain := fmt.Sprintf("%s°N, %s°E", oldQuake.Latitude, oldQuake.Longitude)
-		coordChangedHTML := fmt.Sprintf("<a href=\"%s\">%s°N, %s°E</a>", mapsLink, oldQuake.Latitude, oldQuake.Longitude)
+		coordChangedPlain := buildCoordinates(oldQuake.Latitude, oldQuake.Longitude)
+		coordChangedHTML := buildMapsHtmlLink(oldQuake.Latitude, oldQuake.Longitude)
 		if updatedQuake.Latitude != oldQuake.Latitude || updatedQuake.Longitude != oldQuake.Longitude {
-			updatedMapsLink := fmt.Sprintf("%s%s,%s", mapsBaseURL, updatedQuake.Latitude, updatedQuake.Longitude)
-			coordChangedPlain = fmt.Sprintf("%s°N, %s°E → %s°N, %s°E", oldQuake.Latitude, oldQuake.Longitude, updatedQuake.Latitude, updatedQuake.Longitude)
-			coordChangedHTML = fmt.Sprintf(
-				"<a href=\"%s\">%s°N, %s°E</a> → <b><a href=\"%s\">%s°N, %s°E</a></b>",
-				mapsLink, oldQuake.Latitude, oldQuake.Longitude,
-				updatedMapsLink, updatedQuake.Latitude, updatedQuake.Longitude)
+			coordChangedPlain = fmt.Sprintf("%s → %s",
+				buildCoordinates(oldQuake.Latitude, oldQuake.Longitude),
+				buildCoordinates(updatedQuake.Latitude, updatedQuake.Longitude))
+			coordChangedHTML = fmt.Sprintf("%s → <b>%s</b>",
+				buildMapsHtmlLink(oldQuake.Latitude, oldQuake.Longitude),
+				buildMapsHtmlLink(updatedQuake.Latitude, updatedQuake.Longitude))
 		}
 
 		msg = fmt.Sprintf(
-			"🔁 Earthquake Bulletin Update!\n\nDate & Time: %s\n%s\nMagnitude: %s\nDepth: %skm\nCoordinates: %s\nBulletin: %s\n\nRevised by PHIVOLCS ⚠️",
+			"💡 Earthquake Bulletin Update!\n\nDate & Time: %s\n%s\nMagnitude: %s\nDepth: %skm\nCoordinates: %s\nBulletin: %s\n\nRevised by PHIVOLCS 📝",
 			updatedQuake.DateTime, locChangedPlain, magChangedPlain, depthChangedPlain, coordChangedPlain, updatedQuake.Bulletin,
 		)
 		formatted = fmt.Sprintf(
-			"🔁 <b>Earthquake Bulletin Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>%s<br>📈 <b>Magnitude:</b> %s<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> %s<br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Revised by PHIVOLCS ⚠️",
+			"💡 <b>Earthquake Bulletin Update!</b><br><br>📅 <b>Date & Time:</b> %s<br>%s<br>📈 <b>Magnitude:</b> %s<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> %s<br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Revised by PHIVOLCS 📝",
 			updatedQuake.DateTime, locChangedHTML, magChangedHTML, depthChangedHTML, coordChangedHTML, updatedQuake.Bulletin,
 		)
 	} else {
 		msg = fmt.Sprintf(
-			"🌏 New Earthquake Alert!\n\nDate & Time: %s\nLocation: %s\nMagnitude: %.1f\nDepth: %skm\nCoordinates: %s°N, %s°E\nBulletin: %s\n\nStay safe! ⚠️",
+			"🚨 New Earthquake Alert!\n\nDate & Time: %s\nLocation: %s\nMagnitude: %.1f\nDepth: %skm\nCoordinates: %s°N, %s°E\nBulletin: %s\n\nStay safe! ⚠️",
 			updatedQuake.DateTime, updatedQuake.Location, parseMag(updatedQuake.Magnitude), updatedQuake.Depth, updatedQuake.Latitude, updatedQuake.Longitude, updatedQuake.Bulletin,
 		)
 		formatted = fmt.Sprintf(
-			"🌏 <b>New Earthquake Alert!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude:</b> %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> <a href=\"%s\">%s°N, %s°E</a><br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Stay safe! ⚠️",
+			"🚨 <b>New Earthquake Alert!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude:</b> %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> <a href=\"%s\">%s°N, %s°E</a><br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Stay safe! ⚠️",
 			updatedQuake.DateTime, updatedQuake.Location, parseMag(updatedQuake.Magnitude), updatedQuake.Depth, mapsLink, updatedQuake.Latitude, updatedQuake.Longitude, updatedQuake.Bulletin,
 		)
 	}
