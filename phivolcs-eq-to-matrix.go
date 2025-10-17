@@ -350,7 +350,7 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 		locChangedHTML := fmt.Sprintf("📍 Location: %s", oldQuake.Location)
 		if updatedQuake.Location != oldQuake.Location {
 			locChangedPlain = fmt.Sprintf("New Location: %s\nPrevious: %s", updatedQuake.Location, oldQuake.Location)
-			locChangedHTML = fmt.Sprintf("📍 New Location: <b>%s</b><br>Previous: %s", updatedQuake.Location, oldQuake.Location)
+			locChangedHTML = fmt.Sprintf("<b>📍 New Location: %s</b><br>Old: %s", updatedQuake.Location, oldQuake.Location)
 		}
 
 		magChangedPlain := oldQuake.Magnitude
@@ -395,7 +395,7 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 		formatted = fmt.Sprintf(
 			"🚨 <b>New Earthquake Alert!</b><br><br>📅 <b>Date & Time:</b> %s<br>📍 <b>Location:</b> %s<br>📈 <b>Magnitude:</b> %.1f<br>📊 <b>Depth:</b> %skm<br>🧭 <b>Coordinates:</b> %s<br>📄 <b>Bulletin:</b> <a href=\"%s\">View PHIVOLCS report</a><br><br>Stay safe! ⚠️",
 			updatedQuake.DateTime, updatedQuake.Location, parseMag(updatedQuake.Magnitude),
-			updatedQuake.Depth, buildMapsHtmlLink(updatedQuake.DateTime, updatedQuake.Longitude), updatedQuake.Bulletin,
+			updatedQuake.Depth, buildMapsHtmlLink(updatedQuake.Latitude, updatedQuake.Longitude), updatedQuake.Bulletin,
 		)
 	}
 
