@@ -122,7 +122,7 @@ func main() {
 
 			if !updateExists {
 				if bulletinNo, _ := getBulletinNumber(currentQuake.Bulletin); bulletinNo != 1 {
-					previousQuake, updateExists = determinePastQuakeThroughHeuristics(lastFetchQuakes, currentQuake, previousQuake, updateExists)
+					previousQuake, updateExists = determinePastQuakeThroughHeuristics(lastFetchQuakes, currentQuake)
 				}
 			}
 
@@ -658,7 +658,10 @@ func isCurrentAndPastQSignificant(currentQuake Quake, previousQuake Quake) bool 
 
 // Heuristic to determine if currentQuake is a revised bulletin of a past quake
 // by checking similarly timed quakes and address similarity
-func determinePastQuakeThroughHeuristics(lastFetchQuakes map[string]Quake, currentQuake Quake, previousQuake Quake, updateExists bool) (Quake, bool) {
+func determinePastQuakeThroughHeuristics(lastFetchQuakes map[string]Quake, currentQuake Quake) (Quake, bool) {
+	updateExists := false
+	var previousQuake Quake
+
 	for _, pastQ := range lastFetchQuakes {
 		if isRevisedQuake(currentQuake, pastQ) {
 			previousQuake = pastQ
