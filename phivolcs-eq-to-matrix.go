@@ -151,12 +151,12 @@ func main() {
 			}
 		}
 
-		// Append to existing slice
-		postedQuakesToSave = append(postedQuakesToSave, mapEqToSlice(postedQuakes)...)
-
 		if len(changed) == 0 && len(updated) == 0 {
 			log.Println("No new or updated earthquakes detected.")
 		} else {
+			// Append to existing slice
+			postedQuakesToSave = append(postedQuakesToSave, mapEqToSlice(postedQuakes)...)
+
 			// Send new quakes
 			for i := len(changed) - 1; i >= 0; i-- {
 				q := changed[i]
