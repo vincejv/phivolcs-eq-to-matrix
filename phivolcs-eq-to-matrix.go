@@ -80,6 +80,112 @@ var (
 	refRadiusKm = getEnvFloat("REF_RADIUS_KM", DEFAULT_REF_RADIUS_KM)
 )
 
+// ---- Main loop ----
+func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Println("🌋 PHIVOLCS-to-Matrix earthquake monitor started successfully ✅")
+	log.Printf("Parsing up to %d quake entries from PHIVOLCS", maxQuakeEntries)
+
+	for {
+		doc, err := fetchDocument(PHIVOLCS_BASE_URL)
+		if err != nil {
+			log.Printf("Fetch error: %v", err)
+			time.Sleep(30 * time.Second)
+			continue
+		}
+
+		latestQuakes, err := parseFirstN(doc, maxQuakeEntries)
+		if err != nil {
+			log.Printf("Parse error: %v", err)
+			time.Sleep(30 * time.Second)
+			continue
+		}
+
+		// this is used to determine if a quake is new or updated
+		lastFetchQuakes := readAllQuakesFromFile(CACHE_FILE, quakeOriginKey)
+
+		// this is used to determine if a quake has already been posted to matrix
+		postedQuakes := readAllQuakesFromFile(POST_QUAKE_FILE, quakeLocationKey)
+
+		var changed []Quake
+		var postedQuakesToSave []Quake
+		var updated []struct {
+			New Quake
+			Old Quake
+		}
+
+		// parse each quake from latest fetch
+		for _, currentQuake := range latestQuakes {
+			// check if quake exists in last fetch (by origin and datetime)
+			updatedQuakeKey := quakeOriginKey(currentQuake)
+			previousQuake, updateExists := lastFetchQuakes[updatedQuakeKey]
+
+			if !updateExists {
+				if bulletinNo, _ := getBulletinNumber(currentQuake.Bulletin); bulletinNo != 1 {
+					previousQuake, updateExists = determinePastQuakeThroughHeuristics(lastFetchQuakes, currentQuake, previousQuake, updateExists)
+				}
+			}
+
+			if !updateExists {
+				// new quake detected
+				postedQuakeKey := quakeLocationKey(currentQuake)
+				_, postedExists := postedQuakes[postedQuakeKey]
+				if !postedExists {
+					magVal, err := strconv.ParseFloat(currentQuake.Magnitude, 64)
+					threshold := magnitudeThresholdFor(currentQuake.Latitude, currentQuake.Longitude)
+
+					if err == nil && magVal >= threshold {
+						changed = append(changed, currentQuake)
+						postedQuakesToSave = append(postedQuakesToSave, currentQuake)
+					}
+				}
+			} else if quakeChanged(previousQuake, currentQuake) &&
+				!updatedQuakeHasBeenPosted(postedQuakes, currentQuake) &&
+				isCurrentAndPastQSignificant(currentQuake, previousQuake) {
+				// updated quake detected
+				updated = append(updated, struct {
+					New Quake
+					Old Quake
+				}{currentQuake, previousQuake})
+				postedQuakesToSave = append(postedQuakesToSave, currentQuake)
+			}
+		}
+
+		// Append to existing slice
+		postedQuakesToSave = append(postedQuakesToSave, mapEqToSlice(postedQuakes)...)
+
+		if len(changed) == 0 && len(updated) == 0 {
+			log.Println("No new or updated earthquakes detected.")
+		} else {
+			// Send new quakes
+			for i := len(changed) - 1; i >= 0; i-- {
+				q := changed[i]
+				log.Printf("🆕 New quake detected: %s | M%s | %s", q.DateTime, q.Magnitude, q.Location)
+				if err := postToMatrix(q, false, q); err != nil { // optional: pass q as oldQuake to avoid zero-value
+					log.Printf("Matrix post failed: %v", err)
+				}
+			}
+
+			// Send updated quakes
+			for i := len(updated) - 1; i >= 0; i-- {
+				u := updated[i]
+				log.Printf("🔁 Earthquake bulletin update: %s | %s → %s | %s", u.New.DateTime, u.Old, u.New.Magnitude, u.New.Location)
+				if err := postToMatrix(u.New, true, u.Old); err != nil {
+					log.Printf("Matrix post failed: %v", err)
+				}
+			}
+
+			// only save if there are new posts
+			saveAllQuakesToFile(postedQuakesToSave, POST_QUAKE_FILE)
+		}
+
+		saveAllQuakesToFile(latestQuakes, CACHE_FILE)
+
+		log.Println("Sleeping for 150 seconds before next poll...")
+		time.Sleep(150 * time.Second)
+	}
+}
+
 // --- helpers ---
 // getEnvInt reads an integer environment variable and falls back to a default if not set or invalid.
 func getEnvInt(envVar string, defaultVal int) int {
@@ -522,151 +628,52 @@ func mapEqToSlice(m map[string]Quake) []Quake {
 	return s
 }
 
-// ---- Main loop ----
-func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("🌋 PHIVOLCS-to-Matrix earthquake monitor started successfully ✅")
-	log.Printf("Parsing up to %d quake entries from PHIVOLCS", maxQuakeEntries)
-
-	for {
-		url := PHIVOLCS_BASE_URL
-		doc, err := fetchDocument(url)
-		if err != nil {
-			log.Printf("Fetch error: %v", err)
-			time.Sleep(30 * time.Second)
-			continue
+// updatedQuakeHasBeenPosted checks if the given currentQuake has already been posted by
+// comparing it against the postedQuakes map. It returns true if a known bulletin
+// matching currentQuake is found in postedQuakes, indicating that the quake has
+// already been posted.
+func updatedQuakeHasBeenPosted(postedQuakes map[string]Quake, currentQuake Quake) bool {
+	skipPostingUpdate := false
+	for _, postQ := range postedQuakes {
+		if isKnownBulletin(currentQuake, postQ) {
+			skipPostingUpdate = true
+			break
 		}
-
-		latestQuakes, err := parseFirstN(doc, maxQuakeEntries)
-		if err != nil {
-			log.Printf("Parse error: %v", err)
-			time.Sleep(30 * time.Second)
-			continue
-		}
-
-		// this is used to determine if a quake is new or updated
-		lastFetchQuakes := readAllQuakesFromFile(CACHE_FILE, quakeOriginKey)
-
-		// this is used to determine if a quake has already been posted to matrix
-		postedQuakes := readAllQuakesFromFile(POST_QUAKE_FILE, quakeLocationKey)
-
-		var changed []Quake
-		var postedQuakesToSave []Quake
-		var updated []struct {
-			New Quake
-			Old Quake
-		}
-
-		// parse each quake from latest fetch
-		for _, currentQuake := range latestQuakes {
-			// check if quake exists in last fetch (by origin and datetime)
-			updatedQuakeKey := quakeOriginKey(currentQuake)
-			previousQuake, updateExists := lastFetchQuakes[updatedQuakeKey]
-
-			// even if not found by origin, check if it is a revised bulletin of a past quake
-			// (same date/time up to minute precision and same origin, but higher bulletin number)
-			// this is to handle cases where the origin text changes slightly between bulletins
-			if !updateExists {
-				if bulletinNo, _ := getBulletinNumber(currentQuake.Bulletin); bulletinNo != 1 {
-					for _, pastQ := range lastFetchQuakes {
-						if isRevisedQuake(currentQuake, pastQ) {
-							previousQuake = pastQ
-							updateExists = true
-							break
-						}
-					}
-
-					// as a last resort, check for address similarity among quakes
-					// that occurred at the same date and time (up to minute precision)
-					// this is to catch cases where the origin text changes significantly
-					// but the quake is still the same event
-					similarlyTimedQuakes := filterQuakesByDateTime(mapEqToSlice(lastFetchQuakes), currentQuake.DateTime)
-					for _, pastQ := range similarlyTimedQuakes {
-						if AddressSimilarity(currentQuake.Origin, pastQ.Origin) >= SIMILAR_Q_ORIGIN_THRESH {
-							previousQuake = pastQ
-							updateExists = true
-							break
-						}
-					}
-				}
-			}
-
-			if !updateExists {
-				// if not a delta update, check if already posted (by location and datetime)
-				postedQuakeKey := quakeLocationKey(currentQuake)
-				_, postedExists := postedQuakes[postedQuakeKey]
-				if !postedExists {
-					magVal, err := strconv.ParseFloat(currentQuake.Magnitude, 64)
-
-					// determine threashold based on distance from reference point
-					threshold := magnitudeThresholdFor(currentQuake.Latitude, currentQuake.Longitude)
-
-					if err == nil && magVal >= threshold {
-						// only report magnitudes greater than or equal to determined threshold
-						// new earthquake recorded
-						changed = append(changed, currentQuake)
-						postedQuakesToSave = append(postedQuakesToSave, currentQuake)
-					}
-				}
-			} else if quakeChanged(previousQuake, currentQuake) {
-				// check if this updated bulletin has already been posted
-				skipPostingUpdate := false
-				for _, postQ := range postedQuakes {
-					if isKnownBulletin(currentQuake, postQ) {
-						skipPostingUpdate = true
-						break
-					}
-				}
-				if !skipPostingUpdate {
-					// delta for sending update
-					thresholdForUpdatedQ := magnitudeThresholdFor(currentQuake.Latitude, currentQuake.Longitude)
-					thresholdForOldQ := magnitudeThresholdFor(previousQuake.Latitude, previousQuake.Longitude)
-
-					if parseMag(currentQuake.Magnitude) >= thresholdForUpdatedQ ||
-						parseMag(previousQuake.Magnitude) >= thresholdForOldQ {
-						// only report updates if either the old or new magnitude is above the threshold
-						// earthquake updated
-						updated = append(updated, struct {
-							New Quake
-							Old Quake
-						}{currentQuake, previousQuake})
-						postedQuakesToSave = append(postedQuakesToSave, currentQuake)
-					}
-				}
-			}
-		}
-
-		// Append to existing slice
-		postedQuakesToSave = append(postedQuakesToSave, mapEqToSlice(postedQuakes)...)
-
-		if len(changed) == 0 && len(updated) == 0 {
-			log.Println("No new or updated earthquakes detected.")
-		} else {
-			// Send new quakes
-			for i := len(changed) - 1; i >= 0; i-- {
-				q := changed[i]
-				log.Printf("🆕 New quake detected: %s | M%s | %s", q.DateTime, q.Magnitude, q.Location)
-				if err := postToMatrix(q, false, q); err != nil { // optional: pass q as oldQuake to avoid zero-value
-					log.Printf("Matrix post failed: %v", err)
-				}
-			}
-
-			// Send updated quakes
-			for i := len(updated) - 1; i >= 0; i-- {
-				u := updated[i]
-				log.Printf("🔁 Earthquake bulletin update: %s | %s → %s | %s", u.New.DateTime, u.Old, u.New.Magnitude, u.New.Location)
-				if err := postToMatrix(u.New, true, u.Old); err != nil {
-					log.Printf("Matrix post failed: %v", err)
-				}
-			}
-
-			// only save if there are new posts
-			saveAllQuakesToFile(postedQuakesToSave, POST_QUAKE_FILE)
-		}
-
-		saveAllQuakesToFile(latestQuakes, CACHE_FILE)
-
-		log.Println("Sleeping for 150 seconds before next poll...")
-		time.Sleep(150 * time.Second)
 	}
+	return skipPostingUpdate
+}
+
+// isCurrentAndPastQSignificant determines whether either the current or previous earthquake is considered significant
+// based on their respective magnitudes and location-specific thresholds. It returns true if the magnitude
+// of the current earthquake meets or exceeds the threshold for its location, or if the magnitude of the
+// previous earthquake meets or exceeds the threshold for its location.
+func isCurrentAndPastQSignificant(currentQuake Quake, previousQuake Quake) bool {
+	thresholdForUpdatedQ := magnitudeThresholdFor(currentQuake.Latitude, currentQuake.Longitude)
+	thresholdForOldQ := magnitudeThresholdFor(previousQuake.Latitude, previousQuake.Longitude)
+
+	isSignificant := parseMag(currentQuake.Magnitude) >= thresholdForUpdatedQ ||
+		parseMag(previousQuake.Magnitude) >= thresholdForOldQ
+	return isSignificant
+}
+
+// Heuristic to determine if currentQuake is a revised bulletin of a past quake
+// by checking similarly timed quakes and address similarity
+func determinePastQuakeThroughHeuristics(lastFetchQuakes map[string]Quake, currentQuake Quake, previousQuake Quake, updateExists bool) (Quake, bool) {
+	for _, pastQ := range lastFetchQuakes {
+		if isRevisedQuake(currentQuake, pastQ) {
+			previousQuake = pastQ
+			updateExists = true
+			break
+		}
+	}
+
+	similarlyTimedQuakes := filterQuakesByDateTime(mapEqToSlice(lastFetchQuakes), currentQuake.DateTime)
+	for _, pastQ := range similarlyTimedQuakes {
+		if AddressSimilarity(currentQuake.Origin, pastQ.Origin) >= SIMILAR_Q_ORIGIN_THRESH {
+			previousQuake = pastQ
+			updateExists = true
+			break
+		}
+	}
+	return previousQuake, updateExists
 }
