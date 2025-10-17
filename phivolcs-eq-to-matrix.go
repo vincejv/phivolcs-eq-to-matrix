@@ -41,25 +41,29 @@ type Quake struct {
 
 const (
 	// internal datetime format to store in cache files
-	dateTimeLayout     = "02 January 2006 - 03:04:05 PM"
-	defaultRefPointLat = 10.32
-	defaultRefPointLon = 123.90
-	defaultRefRadiusKm = 110.0
-	defaultMaxRows     = 500
+	DATE_TIME_LAYOUT      = "02 January 2006 - 03:04:05 PM"
+	DEFAULT_REF_POINT_LAT = 10.32
+	DEFAULT_REF_POINT_LON = 123.90
+	DEFAULT_REF_RADIUS_KM = 110.0
+	DEFAULT_MAX_ROWS      = 500
 	// file to store last fetched quakes to check if a quake needs to be updated
-	cacheFile = "last_quakes.json"
+	CACHE_FILE = "last_quakes.json"
 	// file to keep track of already posted quakes
-	postQuakeFile = "posted_quakes.json" // files to store posted matrix quakes
+	POST_QUAKE_FILE = "posted_quakes.json" // files to store posted matrix quakes
 	// PHIVOLCS URL and defaults
-	phivolcsURL = "https://earthquake.phivolcs.dost.gov.ph"
+	PHIVOLCS_BASE_URL = "https://earthquake.phivolcs.dost.gov.ph"
 	// minimum magnitude to consider for posting even outside the refRadiusKm of refPoint
 	// e.g. a strong quake far away should still be reported
 	// while a weaker quake nearby should also be reported
-	globalMagThresh = 4.5
+	GLOBAL_MAG_THRESH = 4.5
 	// minimum magnitude to consider when within refRadiusKm of refPoint (otherwise use globalMagThresh)
-	localMagThresh = 4.0
+	LOCAL_MAG_THRESH = 4.0
 	// Google maps URL format
-	mapsBaseURL = "https://www.google.com/maps?q="
+	MAPS_BASE_URL = "https://www.google.com/maps?q="
+	// percentage threshold for address similarity
+	SIMILAR_Q_ORIGIN_THRESH = 75
+	// minutes delta for similarly timed quakes
+	SIMILAR_Q_MIN_DELTA_THRESH = 3
 )
 
 // ---- Configuration (from environment variables) ----
@@ -69,11 +73,11 @@ var (
 	matrixRoomID  = os.Getenv("MATRIX_ROOM_ID")      // e.g. !roomid:example.org
 	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN") // e.g. syt_abcdefgh123456789
 	// maximum number of quake entries to parse
-	maxQuakeEntries = getEnvInt("PARSE_LIMIT", defaultMaxRows)
+	maxQuakeEntries = getEnvInt("PARSE_LIMIT", DEFAULT_MAX_ROWS)
 	// latitude, longitude and radius for filtering quakes when a bit below threshold
-	refPointLat = getEnvFloat("REF_POINT_LAT", defaultRefPointLat)
-	refPointLon = getEnvFloat("REF_POINT_LON", defaultRefPointLon)
-	refRadiusKm = getEnvFloat("REF_RADIUS_KM", defaultRefRadiusKm)
+	refPointLat = getEnvFloat("REF_POINT_LAT", DEFAULT_REF_POINT_LAT)
+	refPointLon = getEnvFloat("REF_POINT_LON", DEFAULT_REF_POINT_LON)
+	refRadiusKm = getEnvFloat("REF_RADIUS_KM", DEFAULT_REF_RADIUS_KM)
 )
 
 // --- helpers ---
@@ -156,7 +160,7 @@ func extractDateTimeFromURL(url string) (string, error) {
 	t = t.Add(8 * time.Hour)
 
 	// Format in the desired local format
-	return t.Format(dateTimeLayout), nil
+	return t.Format(DATE_TIME_LAYOUT), nil
 }
 
 // Haversine formula to calculate distance between two lat/lon points in kilometers
@@ -175,13 +179,13 @@ func magnitudeThresholdFor(latStr, lonStr string) float64 {
 	lat, err1 := strconv.ParseFloat(latStr, 64)
 	lon, err2 := strconv.ParseFloat(lonStr, 64)
 	if err1 != nil || err2 != nil {
-		return globalMagThresh // fallback if coordinates invalid
+		return GLOBAL_MAG_THRESH // fallback if coordinates invalid
 	}
 
 	if distanceKm(lat, lon, refPointLat, refPointLon) <= refRadiusKm {
-		return localMagThresh // local threshold
+		return LOCAL_MAG_THRESH // local threshold
 	}
-	return globalMagThresh // outside area
+	return GLOBAL_MAG_THRESH // outside area
 }
 
 // Normalize date time string from PHIVOLCS raw table to ensure consistent format
@@ -220,7 +224,7 @@ func parseFirstN(doc *goquery.Document, n int) ([]Quake, error) {
 
 		bulletinURL := ""
 		if link != "" {
-			bulletinURL = fmt.Sprintf("%s/%s", phivolcsURL, strings.ReplaceAll(link, "\\", "/"))
+			bulletinURL = fmt.Sprintf("%s/%s", PHIVOLCS_BASE_URL, strings.ReplaceAll(link, "\\", "/"))
 		}
 
 		// Attempt to parse time from bulletin URL as it is more precise
@@ -284,20 +288,26 @@ func readAllQuakesFromFile(fileName string, keyFunc func(Quake) string) map[stri
 // Determine if two quakes have the same date and time up to minute precision
 // (ignoring seconds) as PHIVOLCS sometimes rounds seconds inconsistently.
 func sameDateAndTimeHM(t1, t2 string) bool {
-	layout := dateTimeLayout
-	// Parse both date-times
+	return sameDateAndTimeHMWithDelta(t1, t2, 0)
+}
+
+// sameDateAndTimeHM returns true if two datetimes are equal up to minute precision,
+// allowing a ±delta minute tolerance. Example: delta = 1 → within one minute difference.
+func sameDateAndTimeHMWithDelta(t1, t2 string, delta int) bool {
+	layout := DATE_TIME_LAYOUT
+
 	d1, err1 := time.Parse(layout, t1)
 	d2, err2 := time.Parse(layout, t2)
 	if err1 != nil || err2 != nil {
 		return false
 	}
 
-	// Compare only date, hour, and minute
-	return d1.Year() == d2.Year() &&
-		d1.Month() == d2.Month() &&
-		d1.Day() == d2.Day() &&
-		d1.Hour() == d2.Hour() &&
-		d1.Minute() == d2.Minute()
+	diff := d1.Sub(d2)
+	if diff < 0 {
+		diff = -diff
+	}
+
+	return diff <= time.Duration(delta)*time.Minute
 }
 
 // Determine if currentQuake is a revised bulletin of pastQuake
@@ -315,6 +325,17 @@ func isRevisedQuake(currentQuake, pastQ Quake) bool {
 		currNum > pastNum
 }
 
+// Create a slice of quakes filtered by date/time (up to minute precision)
+func filterQuakesByDateTime(quakes []Quake, target string) []Quake {
+	var result []Quake
+	for _, q := range quakes {
+		if sameDateAndTimeHMWithDelta(q.DateTime, target, SIMILAR_Q_MIN_DELTA_THRESH) {
+			result = append(result, q)
+		}
+	}
+	return result
+}
+
 // Determine if currentQuake bulletin has already been posted/known
 // (same date/time up to minute precision and same bulletin URL)
 func isKnownBulletin(currentQuake, pastQ Quake) bool {
@@ -324,7 +345,7 @@ func isKnownBulletin(currentQuake, pastQ Quake) bool {
 
 // Build Google Maps HTML link given latitude and longitude
 func buildMapsHtmlLink(lat, lon string) string {
-	return fmt.Sprintf("<a href=\"%s%s,%s\">%s°N, %s°E</a>", mapsBaseURL, lat, lon, lat, lon)
+	return fmt.Sprintf("<a href=\"%s%s,%s\">%s°N, %s°E</a>", MAPS_BASE_URL, lat, lon, lat, lon)
 }
 
 // Build plain text coordinates string
@@ -478,7 +499,7 @@ func mapEqToSlice(m map[string]Quake) []Quake {
 	now := time.Now()
 
 	for k, v := range m {
-		t, err := time.Parse(dateTimeLayout, v.DateTime)
+		t, err := time.Parse(DATE_TIME_LAYOUT, v.DateTime)
 		if err != nil {
 			log.Printf("⚠️ Failed to parse datetime %q: %v", v.DateTime, err)
 			continue
@@ -493,8 +514,8 @@ func mapEqToSlice(m map[string]Quake) []Quake {
 
 	// Sort by datetime (newest first)
 	sort.Slice(s, func(i, j int) bool {
-		ti, _ := time.Parse(dateTimeLayout, s[i].DateTime)
-		tj, _ := time.Parse(dateTimeLayout, s[j].DateTime)
+		ti, _ := time.Parse(DATE_TIME_LAYOUT, s[i].DateTime)
+		tj, _ := time.Parse(DATE_TIME_LAYOUT, s[j].DateTime)
 		return ti.After(tj)
 	})
 
@@ -508,7 +529,7 @@ func main() {
 	log.Printf("Parsing up to %d quake entries from PHIVOLCS", maxQuakeEntries)
 
 	for {
-		url := phivolcsURL
+		url := PHIVOLCS_BASE_URL
 		doc, err := fetchDocument(url)
 		if err != nil {
 			log.Printf("Fetch error: %v", err)
@@ -524,10 +545,10 @@ func main() {
 		}
 
 		// this is used to determine if a quake is new or updated
-		lastFetchQuakes := readAllQuakesFromFile(cacheFile, quakeOriginKey)
+		lastFetchQuakes := readAllQuakesFromFile(CACHE_FILE, quakeOriginKey)
 
 		// this is used to determine if a quake has already been posted to matrix
-		postedQuakes := readAllQuakesFromFile(postQuakeFile, quakeLocationKey)
+		postedQuakes := readAllQuakesFromFile(POST_QUAKE_FILE, quakeLocationKey)
 
 		var changed []Quake
 		var postedQuakesToSave []Quake
@@ -549,6 +570,19 @@ func main() {
 				if bulletinNo, _ := getBulletinNumber(currentQuake.Bulletin); bulletinNo != 1 {
 					for _, pastQ := range lastFetchQuakes {
 						if isRevisedQuake(currentQuake, pastQ) {
+							previousQuake = pastQ
+							updateExists = true
+							break
+						}
+					}
+
+					// as a last resort, check for address similarity among quakes
+					// that occurred at the same date and time (up to minute precision)
+					// this is to catch cases where the origin text changes significantly
+					// but the quake is still the same event
+					similarlyTimedQuakes := filterQuakesByDateTime(mapEqToSlice(lastFetchQuakes), currentQuake.DateTime)
+					for _, pastQ := range similarlyTimedQuakes {
+						if AddressSimilarity(currentQuake.Origin, pastQ.Origin) >= SIMILAR_Q_ORIGIN_THRESH {
 							previousQuake = pastQ
 							updateExists = true
 							break
@@ -627,10 +661,10 @@ func main() {
 			}
 
 			// only save if there are new posts
-			saveAllQuakesToFile(postedQuakesToSave, postQuakeFile)
+			saveAllQuakesToFile(postedQuakesToSave, POST_QUAKE_FILE)
 		}
 
-		saveAllQuakesToFile(latestQuakes, cacheFile)
+		saveAllQuakesToFile(latestQuakes, CACHE_FILE)
 
 		log.Println("Sleeping for 150 seconds before next poll...")
 		time.Sleep(150 * time.Second)
