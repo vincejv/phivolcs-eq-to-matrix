@@ -61,7 +61,7 @@ const (
 	// Google maps URL format
 	MAPS_BASE_URL = "https://www.google.com/maps?q="
 	// percentage threshold for address similarity
-	SIMILAR_Q_ORIGIN_THRESH = 75
+	SIMILAR_Q_ORIGIN_THRESH = 60
 	// minutes delta for similarly timed quakes
 	SIMILAR_Q_MIN_DELTA_THRESH = 3
 )
@@ -673,9 +673,14 @@ func determinePastQuakeThroughHeuristics(lastFetchQuakes map[string]Quake, curre
 	similarlyTimedQuakes := filterQuakesByDateTime(mapEqToSlice(lastFetchQuakes), currentQuake.DateTime)
 	for _, pastQ := range similarlyTimedQuakes {
 		if AddressSimilarity(currentQuake.Origin, pastQ.Origin) >= SIMILAR_Q_ORIGIN_THRESH {
-			previousQuake = pastQ
-			updateExists = true
-			break
+			curQuakeBltnNo, _ := getBulletinNumber(currentQuake.Bulletin)
+			pastQuakeBltnNo, _ := getBulletinNumber(pastQ.Bulletin)
+			if curQuakeBltnNo > pastQuakeBltnNo {
+				previousQuake = pastQ
+				updateExists = true
+				break
+			}
+
 		}
 	}
 	return previousQuake, updateExists
