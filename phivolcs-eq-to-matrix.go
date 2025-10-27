@@ -506,7 +506,7 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 		}
 
 		msg = fmt.Sprintf(
-			"💡 Earthquake Bulletin Update!\n\nDate & Time: %s\n%s\nMagnitude: %s\nDepth: %skm\nCoordinates: %s\nBulletin: %s\n\nRevised by PHIVOLCS 🔄",
+			"💡 Earthquake Bulletin Update!\nDate & Time: %s\n%s\nMagnitude: %s\nDepth: %skm\nCoordinates: %s\nBulletin: %s\nRevised by PHIVOLCS 🔄",
 			updatedQuake.DateTime, locChangedPlain, magChangedPlain, depthChangedPlain, coordChangedPlain, updatedQuake.Bulletin,
 		)
 		formatted = fmt.Sprintf(
@@ -515,7 +515,7 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 		)
 	} else {
 		msg = fmt.Sprintf(
-			"🚨 New Earthquake Alert!\n\nDate & Time: %s\nLocation: %s\nMagnitude: %.1f\nDepth: %skm\nCoordinates: %s\nBulletin: %s\n\nStay safe! ⚠️",
+			"🚨 New Earthquake Alert!\nDate & Time: %s\nLocation: %s\nMagnitude: %.1f\nDepth: %skm\nCoordinates: %s\nBulletin: %s\nStay safe! ⚠️",
 			updatedQuake.DateTime, updatedQuake.Location, parseMag(updatedQuake.Magnitude),
 			updatedQuake.Depth, buildCoordinates(updatedQuake.Latitude, updatedQuake.Longitude), updatedQuake.Bulletin,
 		)
