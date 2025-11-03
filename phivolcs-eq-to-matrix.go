@@ -465,9 +465,11 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 		return fmt.Errorf("missing Matrix environment variables")
 	}
 
-	matrixURL := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message",
+	txnId := fmt.Sprintf("%d", time.Now().UnixNano()/1e6) // unique transaction ID in ms
+	matrixURL := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s",
 		strings.TrimRight(matrixBaseURL, "/"),
 		matrixRoomID,
+		txnId,
 	)
 
 	var msg, formatted string
@@ -534,13 +536,14 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 	}
 
 	data, _ := json.Marshal(payload)
-	req, err := http.NewRequest("POST", matrixURL+"?access_token="+accessToken, bytes.NewBuffer(data))
+	req, err := http.NewRequest("PUT", matrixURL, bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
