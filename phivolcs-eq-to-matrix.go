@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -69,9 +70,9 @@ const (
 // ---- Configuration (from environment variables) ----
 var (
 	// matrix configuration from environment variables
-	matrixBaseURL = strings.TrimRight(os.Getenv("MATRIX_BASE_URL"), "/") // e.g. https://matrix.example.org
-	matrixRoomID  = os.Getenv("MATRIX_ROOM_ID")                          // e.g. !roomid:example.org
-	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN")                     // e.g. syt_abcdefgh123456789
+	matrixBaseURL = os.Getenv("MATRIX_BASE_URL")     // e.g. https://matrix.example.org
+	matrixRoomID  = os.Getenv("MATRIX_ROOM_ID")      // e.g. !roomid:example.org
+	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN") // e.g. syt_abcdefgh123456789
 	// maximum number of quake entries to parse
 	maxQuakeEntries = getEnvInt("PARSE_LIMIT", DEFAULT_MAX_ROWS)
 	// latitude, longitude and radius for filtering quakes when a bit below threshold
@@ -466,10 +467,11 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 	}
 
 	txnId := fmt.Sprintf("%d", time.Now().UnixNano()/1e6) // unique transaction ID in ms
+
 	matrixURL := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s",
 		strings.TrimRight(matrixBaseURL, "/"),
-		matrixRoomID,
-		txnId,
+		url.PathEscape(matrixRoomID), // escape room ID
+		url.PathEscape(txnId),
 	)
 
 	msg, formatted := formatMatrixMsg(updated, oldQuake, updatedQuake)
