@@ -69,9 +69,9 @@ const (
 // ---- Configuration (from environment variables) ----
 var (
 	// matrix configuration from environment variables
-	matrixBaseURL = os.Getenv("MATRIX_BASE_URL")     // e.g. https://matrix.example.org
-	matrixRoomID  = os.Getenv("MATRIX_ROOM_ID")      // e.g. !roomid:example.org
-	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN") // e.g. syt_abcdefgh123456789
+	matrixBaseURL = strings.TrimRight(os.Getenv("MATRIX_BASE_URL"), "/") // e.g. https://matrix.example.org
+	matrixRoomID  = os.Getenv("MATRIX_ROOM_ID")                          // e.g. !roomid:example.org
+	accessToken   = os.Getenv("MATRIX_ACCESS_TOKEN")                     // e.g. syt_abcdefgh123456789
 	// maximum number of quake entries to parse
 	maxQuakeEntries = getEnvInt("PARSE_LIMIT", DEFAULT_MAX_ROWS)
 	// latitude, longitude and radius for filtering quakes when a bit below threshold
@@ -472,8 +472,50 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 		txnId,
 	)
 
-	var msg, formatted string
+	msg, formatted := formatMatrixMsg(updated, oldQuake, updatedQuake)
+	payload := map[string]string{
+		"msgtype":        "m.text",
+		"body":           msg,
+		"format":         "org.matrix.custom.html",
+		"formatted_body": formatted,
+	}
 
+	data, _ := json.Marshal(payload)
+	req, err := http.NewRequest("PUT", matrixURL, bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	var resp *http.Response
+	var body []byte
+
+	for attempt := 1; attempt <= 5; attempt++ {
+		resp, err = client.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			body, _ = io.ReadAll(resp.Body)
+			if resp.StatusCode < 300 {
+				return nil // success
+			}
+		}
+
+		log.Printf("Matrix send attempt %d failed: %v", attempt, err)
+		time.Sleep(time.Duration(attempt*attempt) * time.Second) // backoff: 1s, 4s, 9s...
+	}
+
+	if err != nil {
+		return fmt.Errorf("Matrix request failed after retries: %v", err)
+	}
+	return fmt.Errorf("Matrix API error: %s", string(body))
+}
+
+// Format the Matrix message based on whether it's an update or a new quake
+func formatMatrixMsg(updated bool, oldQuake Quake, updatedQuake Quake) (string, string) {
+	var msg, formatted string
 	if updated {
 		locChangedPlain := fmt.Sprintf("Location: %s", oldQuake.Location)
 		locChangedHTML := fmt.Sprintf("📍 Location: %s", oldQuake.Location)
@@ -527,45 +569,7 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 			updatedQuake.Depth, buildMapsHtmlLink(updatedQuake.Latitude, updatedQuake.Longitude), updatedQuake.Bulletin,
 		)
 	}
-
-	payload := map[string]string{
-		"msgtype":        "m.text",
-		"body":           msg,
-		"format":         "org.matrix.custom.html",
-		"formatted_body": formatted,
-	}
-
-	data, _ := json.Marshal(payload)
-	req, err := http.NewRequest("PUT", matrixURL, bytes.NewBuffer(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	var resp *http.Response
-	var body []byte
-
-	for attempt := 1; attempt <= 5; attempt++ {
-		resp, err = client.Do(req)
-		if err == nil {
-			defer resp.Body.Close()
-			body, _ = io.ReadAll(resp.Body)
-			if resp.StatusCode < 300 {
-				return nil // success
-			}
-		}
-
-		log.Printf("Matrix send attempt %d failed: %v", attempt, err)
-		time.Sleep(time.Duration(attempt*attempt) * time.Second) // backoff: 1s, 4s, 9s...
-	}
-
-	if err != nil {
-		return fmt.Errorf("Matrix request failed after retries: %v", err)
-	}
-	return fmt.Errorf("Matrix API error: %s", string(body))
+	return msg, formatted
 }
 
 func parseMag(m string) float64 {
