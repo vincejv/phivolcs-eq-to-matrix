@@ -544,17 +544,28 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("Matrix API error: %s", string(body))
+	var resp *http.Response
+	var body []byte
+
+	for attempt := 1; attempt <= 5; attempt++ {
+		resp, err = client.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			body, _ = io.ReadAll(resp.Body)
+			if resp.StatusCode < 300 {
+				return nil // success
+			}
+		}
+
+		log.Printf("Matrix send attempt %d failed: %v", attempt, err)
+		time.Sleep(time.Duration(attempt*attempt) * time.Second) // backoff: 1s, 4s, 9s...
 	}
-	return nil
+
+	if err != nil {
+		return fmt.Errorf("Matrix request failed after retries: %v", err)
+	}
+	return fmt.Errorf("Matrix API error: %s", string(body))
 }
 
 func parseMag(m string) float64 {
