@@ -497,16 +497,18 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 
 	for attempt := 1; attempt <= 5; attempt++ {
 		resp, err = client.Do(req)
-		if err == nil {
+		if err != nil {
+			log.Printf("Matrix send attempt %d failed (network error): %v", attempt, err)
+		} else {
 			defer resp.Body.Close()
 			body, _ = io.ReadAll(resp.Body)
 			if resp.StatusCode < 300 {
 				return nil // success
 			}
+			log.Printf("Matrix send attempt %d failed (HTTP %d): %s",
+				attempt, resp.StatusCode, bytes.TrimSpace(body))
 		}
-
-		log.Printf("Matrix send attempt %d failed: %v", attempt, err)
-		time.Sleep(time.Duration(attempt*attempt) * time.Second) // backoff: 1s, 4s, 9s...
+		time.Sleep(time.Duration(attempt*attempt) * time.Second)
 	}
 
 	if err != nil {
