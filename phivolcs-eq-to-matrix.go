@@ -470,7 +470,7 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 
 	matrixURL := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s",
 		strings.TrimRight(matrixBaseURL, "/"),
-		matrixRoomID, // escape room ID
+		matrixRoomID,
 		url.PathEscape(txnId),
 	)
 
@@ -482,38 +482,42 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 		"formatted_body": formatted,
 	}
 
-	data, _ := json.Marshal(payload)
-	req, err := http.NewRequest("PUT", matrixURL, bytes.NewBuffer(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
-
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	var resp *http.Response
 	var body []byte
+	var lastErr error
 
 	for attempt := 1; attempt <= 5; attempt++ {
-		log.Printf("Posting to Matrix URL: %s", matrixURL)
+		data, _ := json.Marshal(payload)
+		req, err := http.NewRequest("PUT", matrixURL, bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Content-Type", "application/json")
+
 		resp, err = client.Do(req)
 		if err != nil {
 			log.Printf("Matrix send attempt %d failed (network error): %v", attempt, err)
+			lastErr = err
 		} else {
-			defer resp.Body.Close()
 			body, _ = io.ReadAll(resp.Body)
+			resp.Body.Close()
+
 			if resp.StatusCode < 300 {
 				return nil // success
 			}
+
 			log.Printf("Matrix send attempt %d failed (HTTP %d): %s",
 				attempt, resp.StatusCode, bytes.TrimSpace(body))
 		}
-		time.Sleep(time.Duration(attempt*attempt) * time.Second)
+
+		time.Sleep(time.Duration(attempt*attempt) * time.Second) // backoff
 	}
 
-	if err != nil {
-		return fmt.Errorf("Matrix request failed after retries: %v", err)
+	if lastErr != nil {
+		return fmt.Errorf("Matrix request failed after retries: %v", lastErr)
 	}
 	return fmt.Errorf("Matrix API error: %s", string(body))
 }
