@@ -470,7 +470,7 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 
 	matrixURL := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s",
 		strings.TrimRight(matrixBaseURL, "/"),
-		url.PathEscape(matrixRoomID), // escape room ID
+		matrixRoomID, // escape room ID
 		url.PathEscape(txnId),
 	)
 
@@ -496,6 +496,7 @@ func postToMatrix(updatedQuake Quake, updated bool, oldQuake Quake) error {
 	var body []byte
 
 	for attempt := 1; attempt <= 5; attempt++ {
+		log.Printf("Posting to Matrix URL: %s", matrixURL)
 		resp, err = client.Do(req)
 		if err != nil {
 			log.Printf("Matrix send attempt %d failed (network error): %v", attempt, err)
