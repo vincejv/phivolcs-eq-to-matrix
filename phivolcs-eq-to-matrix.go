@@ -65,6 +65,8 @@ const (
 	SIMILAR_Q_ORIGIN_THRESH = 60
 	// minutes delta for similarly timed quakes
 	SIMILAR_Q_MIN_DELTA_THRESH = 3
+	// default port for the health check HTTP server
+	DEFAULT_HEALTH_PORT = "8891"
 )
 
 // ---- Configuration (from environment variables) ----
@@ -87,10 +89,13 @@ func main() {
 	log.Println("🌋 PHIVOLCS-to-Matrix earthquake monitor started successfully ✅")
 	log.Printf("Parsing up to %d quake entries from PHIVOLCS", maxQuakeEntries)
 
+	startHealthServer()
+
 	for {
 		doc, err := fetchDocument(PHIVOLCS_BASE_URL)
 		if err != nil {
 			log.Printf("Fetch error: %v", err)
+			setHealth(false, err)
 			time.Sleep(30 * time.Second)
 			continue
 		}
@@ -98,9 +103,13 @@ func main() {
 		latestQuakes, err := parseFirstN(doc, maxQuakeEntries)
 		if err != nil {
 			log.Printf("Parse error: %v", err)
+			setHealth(false, err)
 			time.Sleep(30 * time.Second)
 			continue
 		}
+
+		// fetch (and parse) of PHIVOLCS data succeeded
+		setHealth(true, nil)
 
 		// this is used to determine if a quake is new or updated
 		lastFetchQuakes := readAllQuakesFromFile(CACHE_FILE, quakeOriginKey)
